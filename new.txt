@@ -1,0 +1,147 @@
+import React, { useState, useEffect } from 'react';
+import { View, Dimensions, Alert, ScrollView } from 'react-native';
+import RouteMap from '../../../components/user/RouteMap';
+import UberTypes from '../../../components/user/UberTypes';
+import { useRoute, useNavigation } from '@react-navigation/native';
+import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
+import storage from '@react-native-firebase/storage';  // Import Firebase Storage
+import haversine from 'haversine-distance';
+
+const SearchResults = () => {
+  const [type, setType] = useState(null); // Selected ride type
+  const [userData, setUserData] = useState(null); // User data including name and phone
+  const [distance, setDistance] = useState(0); // Distance between origin and destination
+  const [originName, setOriginName] = useState(''); // Origin place name
+  const [destinationName, setDestinationName] = useState(''); // Destination place name
+
+  const route = useRoute();
+  const navigation = useNavigation();
+
+  const originPlace = route.params?.originPlace;
+  const destinationPlace = route.params?.destinationPlace;
+
+  const originLat = originPlace?.details?.geometry?.location?.lat;
+  const originLng = originPlace?.details?.geometry?.location?.lng;
+  const destinationLat = destinationPlace?.details?.geometry?.location?.lat;
+  const destinationLng = destinationPlace?.details?.geometry?.location?.lng;
+
+  // Logging and setting the names of the origin and destination places
+  useEffect(() => {
+    if (originPlace && destinationPlace) {
+      console.log(originPlace,destinationPlace);
+      const originName = originPlace?.data?.name || 'N/A';
+      const destinationName = destinationPlace?.data?.structured_formatting?.secondary_text || 'N/A';
+      
+      // setOriginName(originName); // Set the origin name
+      // setDestinationName(destinationName); // Set the destination name
+
+      console.log('Origin Place Name:', originName);
+      console.log('Destination Place Name:', destinationName);
+    }
+  }, [originPlace, destinationPlace]);
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const user = auth().currentUser;
+        if (user) {
+          const userDoc = await firestore().collection('users').doc(user.uid).get();
+          if (userDoc.exists) {
+            setUserData(userDoc.data());
+          } else {
+            Alert.alert('Error', 'User data not found.');
+          }
+        } else {
+          Alert.alert('Error', 'Please log in to continue.');
+          navigation.navigate('LoginScreen');
+        }
+      } catch (error) {
+        Alert.alert('Error', 'Failed to fetch user data.');
+      }
+    };
+    fetchUserData();
+
+    // Calculate distance
+    if (originLat && originLng && destinationLat && destinationLng) {
+      const startPoint = { latitude: originLat, longitude: originLng };
+      const endPoint = { latitude: destinationLat, longitude: destinationLng };
+      const dist = haversine(startPoint, endPoint) / 1000;
+      setDistance(dist.toFixed(2)); // Store distance in km
+    }
+  }, [navigation, originLat, originLng, destinationLat, destinationLng]);
+
+  const calculatePrice = (baseRatePerKm) => {
+    return (baseRatePerKm * distance).toFixed(2);
+  };
+
+  const onSubmit = async () => {
+    // if (!type) {
+    //   Alert.alert('Select a ride type', 'Please select a ride type to continue.');
+    //   return;
+    }
+
+    // try {
+    //   const user = auth().currentUser;
+    //   let profilePhotoUrl = '';  // Initialize profilePhoto URL
+
+    //   // Upload profile photo if it exists and is a local file
+    //   if (userData?.profilePhoto && userData.profilePhoto.startsWith('file://')) {
+    //     const reference = storage().ref(`profile_photos/${user.uid}.jpg`);
+    //     await reference.putFile(userData.profilePhoto);  // Upload file
+    //     profilePhotoUrl = await reference.getDownloadURL();  // Get the download URL
+    //   } else {
+    //     profilePhotoUrl = userData?.profilePhoto || '';  // Use existing URL if already stored
+    //   }
+
+      // Prepare order data with the uploaded image URL and place names
+      // const orderData = {
+      //   originLatitude: originLat,
+      //   originLongitude: originLng,
+      //   destLatitude: destinationLat,
+      //   destLongitude: destinationLng,
+      //   type,
+      //   status: 'Pending',
+      //   createdAt: firestore.FieldValue.serverTimestamp(),
+      //   userId: user.uid,
+      //   userName: userData?.name,
+      //   userPhone: userData?.phoneNumber,
+      //   userPhoto: profilePhotoUrl,  // Store the download URL
+      //   originName, // Include origin name in order data
+      //   destinationName, // Include destination name in order data
+      // };
+
+  //     const orderRef = await firestore().collection('orders').add(orderData);
+  //     navigation.navigate('OrderScreen', { id: orderRef.id,
+  //       originPlace: originPlace, 
+  //       destinationPlace: destinationPlace 
+  //     });
+      
+  //   } catch (error) {
+  //     Alert.alert('Order Error', `Failed to create order: ${error.message}`);
+  //   }
+  // };
+
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={{ height: Dimensions.get('window').height - 380 }}>
+        <RouteMap
+          origin={{ latitude: originLat, longitude: originLng }}
+          destination={{ latitude: destinationLat, longitude: destinationLng }}
+        />
+      </View>
+      <View style={{ height: 380 }}>
+        <ScrollView>
+          <UberTypes
+            typeState={[type, setType]} 
+            distance={distance} 
+            calculatePrice={calculatePrice} 
+            onSubmit={onSubmit} 
+          />
+        </ScrollView>
+      </View>
+    </View>
+  );
+};
+
+export default SearchResults;
