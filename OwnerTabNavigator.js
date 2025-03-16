@@ -44,9 +44,9 @@ const OwnerTabNavigator = () => (
       };
     }}
   >
-    <Tab.Screen name="OwnerHome" component={OwnerHomeScreen} />
-    <Tab.Screen name="Dashboard" component={OwnerDashboardScreen} />
-    <Tab.Screen name="BusinessProfile" component={BusinessProfileScreen} />
+    <Tab.Screen name="OwnerHome" component={OwnerHomeScreen} options={{ headerShown: false }}/>
+    <Tab.Screen name="Dashboard" component={OwnerDashboardScreen} options={{ headerShown: false }} />
+    <Tab.Screen name="BusinessProfile" component={BusinessProfileScreen} options={{ headerShown: false }} />
     <Tab.Screen name="Logout" component={Logout} options={{ tabBarLabel: 'Logout' }} />
   </Tab.Navigator>
 );

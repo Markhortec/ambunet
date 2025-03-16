@@ -36,6 +36,8 @@ import DHomeScreen from "./src/screens/driver/HomeScreen";
 import NewOrderPopup from "./src/components/driver/NewOrderPopup";
 import DriverTrack from "./src/screens/driver/DriverTrack/DriverTrack";
 import UserTrack from "./src/screens/user/UserTrack/UserTrack";
+import DriversListScreen from "./src/screens/owner/DriversListScreen";
+import AmbulancesListScreen from "./src/screens/owner/AmbulancesListScreen";
 // Create navigators
 const Stack = createStackNavigator();
 const Drawer = createDrawerNavigator();
@@ -57,6 +59,8 @@ const AppStackNavigator = () => (
     <Stack.Screen name="SplashScreen" component={SplashScreen} options={{ headerShown: false }} />
     <Stack.Screen name="AuthLoadingScreen" component={AuthLoadingScreen} />
     <Stack.Screen name="RoleScreen" component={RoleScreen} options={{ headerShown: false }} />
+    <Stack.Screen name="DriversList" component={DriversListScreen} />
+    <Stack.Screen name="AmbulancesList" component={AmbulancesListScreen} />
     <Stack.Screen name="RegistrationScreen" component={RegistrationScreen} />
     <Stack.Screen name="OwnerTabNavigator" component={OwnerTabNavigator} options={{ headerShown: false }} />
     <Stack.Screen name="OwnerHomeScreen" component={OwnerHomeScreen} />
@@ -68,7 +72,7 @@ const AppStackNavigator = () => (
     <Stack.Screen name="AddDriverScreen" component={AddDriverScreen} />
     <Stack.Screen name="AddAmbulanceScreen" component={AddAmbulanceScreen} />
     <Stack.Screen name="BusinessRegistrationScreen" component={BusinessRegistrationScreen} />
-    <Stack.Screen name="OwnerDashboardScreen" component={OwnerDashboardScreen} />
+    <Stack.Screen name="OwnerDashboardScreen" component={OwnerDashboardScreen} options={{ headerShown: false }} />
     <Stack.Screen name="HomeScreen" component={DrawerNavigator} options={{ headerShown: false }} />
     <Stack.Screen name="SearchResults" component={SearchResults} options={{ headerShown: false }} />
     <Stack.Screen name="OrderScreen" component={OrderScreen} options={{ headerShown: false }} />

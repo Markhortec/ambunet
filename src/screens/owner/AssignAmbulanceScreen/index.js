@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Alert, Text, TouchableOpacity, SafeAreaView, ActivityIndicator, LogBox } from 'react-native';
+import { View, StyleSheet, Alert, Text, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
+import LinearGradient from 'react-native-linear-gradient';
 
 const AssignAmbulanceScreen = () => {
   const [drivers, setDrivers] = useState([]);
@@ -12,9 +13,6 @@ const AssignAmbulanceScreen = () => {
   const [selectedAmbulance, setSelectedAmbulance] = useState('');
   const [loading, setLoading] = useState(true);
   const [companyId, setCompanyId] = useState('');
-
-  // Ignore all log notifications
-  //LogBox.ignoreAllLogs();
 
   useEffect(() => {
     const fetchCompanyIdAndData = async () => {
@@ -138,24 +136,31 @@ const AssignAmbulanceScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.mainContent}>
-        <Text style={styles.title}>Assign Ambulance</Text>
+      {/* Header with Gradient */}
+      <View>
+        <LinearGradient colors={['#F70000', '#D60000']} style={styles.header}>
+          <Text style={styles.headerTitle}>Assign Ambulance</Text>
+        </LinearGradient>
+      </View>
 
+      <View style={styles.mainContent}>
         <View style={styles.pickerContainer}>
           <View style={styles.pickerHeader}>
             <Icon name="account" size={20} color="#555" style={styles.icon} />
             <Text style={styles.label}>Select Driver</Text>
           </View>
-          <Picker
-            selectedValue={selectedDriver}
-            onValueChange={(itemValue) => setSelectedDriver(itemValue)}
-            style={styles.picker}
-          >
-            <Picker.Item label="Select Driver" value="" />
-            {drivers.map(driver => (
-              <Picker.Item key={driver.id} label={driver.name} value={driver.id} />
-            ))}
-          </Picker>
+          <View style={styles.pickerWrapper}>
+            <Picker
+              selectedValue={selectedDriver}
+              onValueChange={(itemValue) => setSelectedDriver(itemValue)}
+              style={styles.picker}
+            >
+              <Picker.Item label="Select Driver" value="" />
+              {drivers.map(driver => (
+                <Picker.Item key={driver.id} label={driver.name} value={driver.id} />
+              ))}
+            </Picker>
+          </View>
         </View>
 
         <View style={styles.pickerContainer}>
@@ -163,16 +168,18 @@ const AssignAmbulanceScreen = () => {
             <Icon name="ambulance" size={20} color="#555" style={styles.icon} />
             <Text style={styles.label}>Select Ambulance</Text>
           </View>
-          <Picker
-            selectedValue={selectedAmbulance}
-            onValueChange={(itemValue) => setSelectedAmbulance(itemValue)}
-            style={styles.picker}
-          >
-            <Picker.Item label="Select Ambulance" value="" />
-            {ambulances.map(ambulance => (
-              <Picker.Item key={ambulance.id} label={ambulance.registrationNumber} value={ambulance.id} />
-            ))}
-          </Picker>
+          <View style={styles.pickerWrapper}>
+            <Picker
+              selectedValue={selectedAmbulance}
+              onValueChange={(itemValue) => setSelectedAmbulance(itemValue)}
+              style={styles.picker}
+            >
+              <Picker.Item label="Select Ambulance" value="" />
+              {ambulances.map(ambulance => (
+                <Picker.Item key={ambulance.id} label={ambulance.registrationNumber} value={ambulance.id} />
+              ))}
+            </Picker>
+          </View>
         </View>
 
         <TouchableOpacity style={styles.assignButton} onPress={assignAmbulance}>
@@ -188,6 +195,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F4F4F4',
   },
+  header: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
   mainContent: {
     flex: 1,
     padding: 20,
@@ -202,6 +221,14 @@ const styles = StyleSheet.create({
   },
   pickerContainer: {
     marginBottom: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   pickerHeader: {
     flexDirection: 'row',
@@ -216,11 +243,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#555',
   },
-  picker: {
-    height: 50,
+  pickerWrapper: {
     borderColor: '#B0BEC5',
     borderWidth: 1,
     borderRadius: 5,
+    overflow: 'hidden',
+  },
+  picker: {
+    height: 50,
     backgroundColor: '#FFFFFF',
   },
   assignButton: {

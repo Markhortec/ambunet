@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ActivityIndicator, SafeAreaView, TouchableOpaci
 import { useSelector, useDispatch } from 'react-redux';
 import { fetchUserData } from '../../../redux/userSlice';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'; // Assuming you are using react-native-vector-icons
-
+import LinearGradient from 'react-native-linear-gradient';
 
 const OwnerHomeScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
@@ -33,6 +33,13 @@ const OwnerHomeScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header with Gradient */}
+      <View>
+        <LinearGradient colors={['#F70000', '#D60000']} style={styles.header}>
+          <Text style={styles.headerTitle}>Owner Home</Text>
+        </LinearGradient>
+      </View>
+
       <View style={styles.mainContent}>
         <Text style={styles.welcomeText}>Welcome, {userName || 'Owner'}!</Text>
 
@@ -70,6 +77,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFF',
+  },
+  header: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
   },
   mainContent: {
     flex: 1,
@@ -110,6 +129,5 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
-
 
 export default OwnerHomeScreen;
