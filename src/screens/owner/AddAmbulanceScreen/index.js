@@ -90,6 +90,8 @@ const AddAmbulanceScreen = () => {
           sideImage,
           companyId,
           createdAt: new Date(),
+          ambulanceStatus: 'active', // Added field with default value
+          requestStatus: 'send', // Added field with default value
         });
 
         Alert.alert('Success', 'Ambulance added successfully!');

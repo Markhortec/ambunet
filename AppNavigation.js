@@ -38,6 +38,7 @@ import DriverTrack from "./src/screens/driver/DriverTrack/DriverTrack";
 import UserTrack from "./src/screens/user/UserTrack/UserTrack";
 import DriversListScreen from "./src/screens/owner/DriversListScreen";
 import AmbulancesListScreen from "./src/screens/owner/AmbulancesListScreen";
+import { useAuth } from "./src/hooks/useAuth";
 // Create navigators
 const Stack = createStackNavigator();
 const Drawer = createDrawerNavigator();
@@ -54,8 +55,24 @@ const DrawerNavigator = () => (
 );
 
 // Main App Stack Navigator
-const AppStackNavigator = () => (
-  <Stack.Navigator>
+// const AppStackNavigator = () => (
+  
+// );
+
+const AppNavigation = () => {
+  const { loading } = useAuth();
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <ActivityIndicator size="large" color="#0000ff" />
+      </View>
+    );
+  }
+
+  return (
+    <NavigationContainer >
+      <Stack.Navigator>
     <Stack.Screen name="SplashScreen" component={SplashScreen} options={{ headerShown: false }} />
     <Stack.Screen name="AuthLoadingScreen" component={AuthLoadingScreen} />
     <Stack.Screen name="RoleScreen" component={RoleScreen} options={{ headerShown: false }} />
@@ -83,65 +100,6 @@ const AppStackNavigator = () => (
     <Stack.Screen name="DriverTrack" component={DriverTrack} options={{ headerShown: false }} />
     <Stack.Screen name="UserTrack" component={UserTrack} options={{ headerShown: false }} />
   </Stack.Navigator>
-);
-
-const AppNavigation = () => {
-  const dispatch = useDispatch();
-  const navigationRef = useRef(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const checkUser = async () => {
-      try {
-        const user = auth().currentUser;
-        const role = await AsyncStorage.getItem("userRole");
-
-        if (user) {
-          const userId = user.uid;
-          const userDoc = await firestore().collection("users").doc(userId).get();
-
-          if (userDoc.exists) {
-            const userData = userDoc.data();
-            dispatch(setUserInfo({ uid: userId, ...userData }));
-            navigateBasedOnRole(role, userId);
-          } else {
-            navigationRef.current?.navigate("ProfileScreen");
-          }
-        } else {
-          navigationRef.current?.navigate("RegistrationScreen");
-        }
-        setLoading(false);
-      } catch (error) {
-        console.error("Error checking user data: ", error);
-        Alert.alert("Error", "An error occurred while checking user data.");
-        setLoading(false);
-      }
-    };
-
-    checkUser();
-  }, [dispatch]);
-
-  const navigateBasedOnRole = async (role, userId) => {
-    if (role === "owner") {
-      navigationRef.current?.navigate("OwnerTabNavigator");
-    } else if (role === "user") {
-      navigationRef.current?.navigate("HomeScreen");
-    } else {
-      navigationRef.current?.navigate("RoleScreen");
-    }
-  };
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator size="large" color="#0000ff" />
-      </View>
-    );
-  }
-
-  return (
-    <NavigationContainer ref={navigationRef}>
-      <AppStackNavigator />
     </NavigationContainer>
   );
 };

@@ -1,0 +1,72 @@
+const handleBookRide = async () => {
+  if (!type) {
+    return Alert.alert('Select Vehicle', 'Please choose a vehicle type to continue');
+  }
+
+  try {
+    setLoading(true);
+    const user = auth().currentUser;
+    const selectedType = typesData.find((t) => t.type === type);
+
+    // Adjusted orderData structure to match the orderSlice schema
+    const orderData = {
+      // Not available at this stage; set to null or update later
+      ambulanceRegNo: null,
+      assignedDriverId: null,
+      createdAt: firestore.FieldValue.serverTimestamp(),
+      driverLocation: {
+        latitude: null,
+        longitude: null,
+      },
+      driverName: '',
+      driverPhone: '',
+      // Nest route info so that distance and duration are within destination
+      route: {
+        origin: { lat: origin.lat, lng: origin.lng, name: originName },
+        destination: {
+          lat: destination.lat,
+          lng: destination.lng,
+          name: destinationName,
+          distance: distance ?? 0,
+          duration: duration ?? 0,
+        },
+      },
+      // User details
+      user: {
+        id: user.uid,
+        name: userData.name,
+        phone: userData.phoneNumber,
+      },
+      // Vehicle details
+      vehicle: {
+        type: selectedType.type,
+        price: calculatePrice(selectedType.baseRatePerKm),
+      },
+      status: 'pending',
+    };
+
+    // Create the order in Firestore
+    const orderRef = await firestore().collection('orders').add(orderData);
+
+    // Dispatch the order data to Redux (include orderRef.id if desired)
+    dispatch(setOrderData({
+      ...orderData,
+      createdAt: new Date().toISOString(), // or use serverTimestamp() as needed
+    }));
+
+    // Navigate to the order screen with the new order details
+    navigation.navigate('OrderScreen', {
+      id: orderRef.id,
+      originPlace,
+      destinationPlace,
+      originName,
+      destinationName,
+      distance, // Pass distance if still needed
+      price: orderData.vehicle.price,
+    });
+
+  } catch (error) {
+    console.error('Order Creation Error:', error);
+    Alert.alert('Order Error', `Failed to create order: ${error.message}`);
+  }
+};

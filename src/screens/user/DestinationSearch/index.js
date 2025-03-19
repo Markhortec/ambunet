@@ -67,6 +67,7 @@ const DestinationSearch = (props) => {
           query={{
             key: 'AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM',
             language: 'en',
+            components: 'country:pk',
           }}
           renderRow={(data) => <PlaceRow data={data} />}
           renderDescription={(data) => data.description || data.vicinity}
@@ -93,6 +94,7 @@ const DestinationSearch = (props) => {
           query={{
             key: 'AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM',
             language: 'en',
+            components: 'country:pk',
           }}
           renderRow={(data) => <PlaceRow data={data} />}
         />

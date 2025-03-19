@@ -131,7 +131,7 @@ const onGoogleButtonPress = async () => {
           }
       } else {
           // If no user document exists, create a new user document in Firestore
-          const fetchedRole = await AsyncStorage.getItem('userRole') || 'User'; 
+          const fetchedRole = (await AsyncStorage.getItem('userRole')) ?? 'User';
           await firestore().collection('users').doc(uid).set({
               email,
               displayName,
@@ -164,21 +164,21 @@ const onGoogleButtonPress = async () => {
 
 
 
-  const renderGoogleSignInButton = () => (
-    <TouchableOpacity
-      style={styles.googleButtonContainer}
-      onPress={onGoogleButtonPress}
-      disabled={loading}
-    >
-      <View style={styles.customGoogleButton}>
-        {loading ? (
-          <ActivityIndicator size="small" color="black" />
-        ) : (
-          <Text style={styles.googleButtonText}>Sign in with Google</Text>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
+const renderGoogleSignInButton = () => (
+  <TouchableOpacity
+    style={[styles.googleButtonContainer, styles.elevatedButton]}
+    onPress={onGoogleButtonPress}
+    disabled={loading}
+  >
+    <View style={[styles.customGoogleButton, loading && styles.disabledButton]}>
+      {loading ? (
+        <ActivityIndicator size="small" color="black" />
+      ) : (
+        <Text style={styles.googleButtonText}>Sign in with Google</Text>
+      )}
+    </View>
+  </TouchableOpacity>
+);
 
   const onChangePhone = (number) => {
     if (number === '' || /^[0-9\b]+$/.test(number)) {
@@ -444,17 +444,30 @@ const styles = StyleSheet.create({
     marginTop: 50,
   },
   customGoogleButton: {
-    backgroundColor: 'lightblue',
-    borderRadius: 10,
-    height: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#747775',
+    borderRadius: 4,
     flexDirection: 'row',
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   googleButtonText: {
-    color: 'black',
+    color: '#1F1F1F',
     fontSize: 16,
-    marginLeft: 10,
+    fontWeight: '500',
+    marginLeft: 12,
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  elevatedButton: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
 });
 

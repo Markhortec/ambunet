@@ -52,32 +52,65 @@ const SearchResults = () => {
   useEffect(() => {
     const initializeScreen = async () => {
       try {
+        console.log("Initializing SearchResults Screen...");
+        console.log("Route Params:", route.params);
+
+        if (!origin || !destination) {
+          const errorMessage = 'Origin or destination is missing.';
+          console.error(errorMessage);
+          Alert.alert('Error', errorMessage);
+          setLoading(false);
+          return;
+        }
+
         // Fetch formatted addresses for origin and destination
+        console.log("Fetching formatted addresses...");
         const [originRes, destinationRes] = await Promise.all([
           Geocoding.from(origin.lat, origin.lng),
           Geocoding.from(destination.lat, destination.lng)
         ]);
         
+        console.log("Origin Geocoding Result:", originRes);
+        console.log("Destination Geocoding Result:", destinationRes);
+
         setOriginName(originRes.results[0]?.formatted_address || 'Unknown Location');
         setDestinationName(destinationRes.results[0]?.formatted_address || 'Unknown Location');
 
         // Get the current user's data
+        console.log("Fetching user data...");
         const user = auth().currentUser;
-        if (!user) throw new Error('User not authenticated');
+        if (!user) {
+          const errorMessage = 'User not authenticated.';
+          console.error(errorMessage);
+          Alert.alert('Error', errorMessage);
+          setLoading(false);
+          navigation.goBack();
+          return;
+        }
         
         const userDoc = await firestore().collection('users').doc(user.uid).get();
-        if (!userDoc.exists) throw new Error('User data not found');
+        if (!userDoc.exists) {
+          const errorMessage = 'User data not found.';
+          console.error(errorMessage);
+          Alert.alert('Error', errorMessage);
+          setLoading(false);
+          navigation.goBack();
+          return;
+        }
         
+        console.log("User Data:", userDoc.data());
         setUserData(userDoc.data());
         setLoading(false);
       } catch (error) {
-        Alert.alert('Error', error.message);
+        console.error("Error during initialization:", error);
+        Alert.alert('Error', `An error occurred: ${error.message}`);
+        setLoading(false);
         navigation.goBack();
       }
     };
 
     initializeScreen();
-  }, []);
+  }, [navigation, origin, destination, route.params]);
 
   // Animate the book button when pressed
   const handlePressIn = () => {
@@ -100,11 +133,13 @@ const SearchResults = () => {
   };
   const handleBookRide = async () => {
     if (!type) {
-      return Alert.alert('Select Vehicle', 'Please choose a vehicle type to continue');
+      Alert.alert('Select Vehicle', 'Please choose a vehicle type to continue');
+      return;
     }
     
     try {
       setLoading(true);
+      console.log("Booking ride...");
       const user = auth().currentUser;
       const selectedType = typesData.find((t) => t.type === type);
       
@@ -118,8 +153,8 @@ const SearchResults = () => {
         route: {
           origin: { ...origin, name: originName },
           destination: { ...destination, name: destinationName },
-          distance: distance ?? 0,  
-          duration: duration ?? 0,  
+          distance: distance ?? 0,    
+          duration: duration ?? 0,    
         },
         vehicle: {
           type: selectedType.type,
@@ -128,9 +163,10 @@ const SearchResults = () => {
         status: 'pending',
         createdAt: firestore.FieldValue.serverTimestamp(),
       };
+      console.log("Order Data:", orderData);
       // Create the order in the unified "orders" collection.
       const orderRef = await firestore().collection('orders').add(orderData);
-
+      console.log("Order Reference:", orderRef);
       dispatch(setOrderData({
         orderId: orderRef.id,
         ...orderData,
@@ -144,12 +180,14 @@ const SearchResults = () => {
         originName,
         destinationName,
         distance, // Pass distance
-        price: orderData.vehicle.price,    // Pass price correctly
+        price: orderData.vehicle.price,        // Pass price correctly
       });
       
     } catch (error) {
       console.error('Order Creation Error:', error);
       Alert.alert('Order Error', `Failed to create order: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
   };
     
@@ -167,7 +205,7 @@ const SearchResults = () => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4a90e2" />
+        <ActivityIndicator size="large" color="#e74c3c" />
         <Text style={styles.loadingText}>Preparing Your Ride Options...</Text>
       </View>
     );
@@ -193,8 +231,8 @@ const SearchResults = () => {
           initialRegion={{
             latitude: (origin.lat + destination.lat) / 2,
             longitude: (origin.lng + destination.lng) / 2,
-            latitudeDelta: Math.abs(origin.lat - destination.lat) * 1.5,
-            longitudeDelta: Math.abs(origin.lng - destination.lng) * 1.5,
+            latitudeDelta: Math.abs(origin.lat - destination.lat) * 2, // Increased delta for zoom out
+            longitudeDelta: Math.abs(origin.lng - destination.lng) * 2, // Increased delta for zoom out
           }}
           mapPadding={{ top: 0, right: 0, bottom: height * 0.4, left: 0 }}
         >
@@ -203,11 +241,14 @@ const SearchResults = () => {
             destination={destinationCoords}
             apikey={GOOGLE_MAPS_APIKEY}
             strokeWidth={4}
-            strokeColor="#4a90e2"
+            strokeColor="#e74c3c"  // Red route line
             precision="high"
             onReady={(result) => {
+              console.log("MapViewDirections onReady:", result);
               if (result.distance === 0 || result.duration === 0) {
-                setRouteError('No route found between these locations');
+                const errorMessage = 'No route found between these locations';
+                setRouteError(errorMessage);
+                console.error(errorMessage);
                 return;
               }
               setDistance(result.distance);
@@ -221,7 +262,7 @@ const SearchResults = () => {
 
           {/* Error Banner */}
           {routeError && (
-            <View style={styles.errorBanner}>
+            <View style={[styles.errorBanner, { backgroundColor: '#e74c3c' }]}>
               <Ionicons name="warning" size={20} color="#fff" />
               <Text style={styles.errorText}>{routeError}</Text>
             </View>
@@ -229,15 +270,15 @@ const SearchResults = () => {
 
           {/* Origin Marker */}
           <Marker coordinate={originCoords}>
-            <View style={styles.markerBubble}>
+            <View style={[styles.markerBubble, { backgroundColor: '#e74c3c' }]}>
               <Ionicons name="location" size={20} color="#fff" />
-              <View style={[styles.markerArrow, { backgroundColor: '#4a90e2' }]} />
+              <View style={[styles.markerArrow, { backgroundColor: '#e74c3c' }]} />
             </View>
           </Marker>
 
           {/* Destination Marker */}
           <Marker coordinate={destinationCoords}>
-            <View style={styles.markerBubble}>
+            <View style={[styles.markerBubble, { backgroundColor: '#e74c3c' }]}>
               <Ionicons name="flag" size={18} color="#fff" />
               <View style={[styles.markerArrow, { backgroundColor: '#e74c3c' }]} />
             </View>
@@ -247,7 +288,7 @@ const SearchResults = () => {
         {/* Route Info Card */}
         <View style={styles.routeInfoCard}>
           <View style={styles.infoItem}>
-            <Ionicons name="speedometer" size={18} color="#4a90e2" />
+            <Ionicons name="speedometer" size={18} color="#e74c3c" />
             <Text style={styles.infoText}>
               {distance ? `${distance.toFixed(1)} km` : '--'}
             </Text>
@@ -256,7 +297,7 @@ const SearchResults = () => {
           <View style={styles.infoDivider} />
           
           <View style={styles.infoItem}>
-            <Ionicons name="time" size={18} color="#4a90e2" />
+            <Ionicons name="time" size={18} color="#e74c3c" />
             <Text style={styles.infoText}>
               {duration ? `${Math.round(duration)} mins` : '--'}
             </Text>
@@ -272,7 +313,7 @@ const SearchResults = () => {
         {/* Locations Card */}
         <View style={styles.locationsCard}>
           <View style={styles.locationRow}>
-            <View style={[styles.locationDot, { backgroundColor: '#4a90e2' }]} />
+            <View style={[styles.locationDot, { backgroundColor: '#e74c3c' }]} />
             <View style={styles.locationTexts}>
               <Text style={styles.locationLabel}>Pickup Location</Text>
               <Text style={styles.locationValue} numberOfLines={2}>
@@ -300,7 +341,11 @@ const SearchResults = () => {
         {typesData.map((vehicle) => (
           <Pressable
             key={vehicle.id}
-            onPress={() => setType(vehicle.type)}
+            onPress={() => {
+                console.log(`Vehicle type selected: ${vehicle.type}`);
+                setType(vehicle.type)
+              }
+            }
             style={({ pressed }) => [
               styles.vehicleCard,
               type === vehicle.type && styles.selectedVehicleCard,
@@ -368,7 +413,7 @@ const SearchResults = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#fff',  // White background
   },
   loadingContainer: {
     flex: 1,
@@ -383,7 +428,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-Medium',
   },
   mapContainer: {
-    height: height * 0.45,
+    height: height * 0.60,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
     overflow: 'hidden',
@@ -392,7 +437,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   markerBubble: {
-    backgroundColor: '#4a90e2',
+    backgroundColor: '#e74c3c',  // Red marker bubble
     padding: 12,
     borderRadius: 24,
     flexDirection: 'row',
@@ -509,7 +554,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   errorBanner: {
-    backgroundColor: '#e74c3c',
+    backgroundColor: '#e74c3c',  // Red error banner
     padding: 12,
     margin: 16,
     borderRadius: 8,
@@ -523,7 +568,7 @@ const styles = StyleSheet.create({
   },
   selectedVehicleCard: {
     borderWidth: 2,
-    borderColor: '#4a90e2',
+    borderColor: '#e74c3c',  // Red selected border
     backgroundColor: '#f8fbff',
   },
   vehicleImage: {
@@ -552,7 +597,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   priceTag: {
-    backgroundColor: '#4a90e2',
+    backgroundColor: '#e74c3c',  // Red price tag
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
@@ -566,7 +611,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -8,
     right: -8,
-    backgroundColor: '#4a90e2',
+    backgroundColor: '#e74c3c',  // Red selected badge
     borderRadius: 12,
     padding: 4,
   },
@@ -577,7 +622,7 @@ const styles = StyleSheet.create({
     right: 16,
   },
   bookButton: {
-    backgroundColor: '#4a90e2',
+    backgroundColor: '#e74c3c',  // Red book button
     borderRadius: 14,
     padding: 18,
     flexDirection: 'row',

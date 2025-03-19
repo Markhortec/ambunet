@@ -114,6 +114,8 @@ const AddDriverScreen = () => {
         cnicFrontImage,
         cnicBackImage,
         companyId,
+        driverStatus: 'active', // Default value for driverStatus
+        requestStatus: 'send',  // Default value for requestStatus
         createdAt: firestore.FieldValue.serverTimestamp(),
       });
       Alert.alert('Success', 'Driver added successfully!');
