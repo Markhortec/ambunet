@@ -1,10 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { View, TextInput, StyleSheet, Alert, ScrollView, Image, Text, TouchableOpacity, SafeAreaView } from 'react-native';
+import {
+  View,
+  TextInput,
+  StyleSheet,
+  Alert,
+  ScrollView,
+  Image,
+  Text,
+  TouchableOpacity,
+  SafeAreaView,
+  Platform,
+  ActivityIndicator,
+} from 'react-native';
 import { Picker } from '@react-native-picker/picker';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons'; 
-import * as ImagePicker from 'react-native-image-picker'; 
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import * as ImagePicker from 'react-native-image-picker';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
+import storage from '@react-native-firebase/storage';
 
 const AddDriverScreen = () => {
   const [name, setName] = useState('');
@@ -19,12 +32,16 @@ const AddDriverScreen = () => {
   const [cnicFrontImage, setCnicFrontImage] = useState('');
   const [cnicBackImage, setCnicBackImage] = useState('');
   const [companyId, setCompanyId] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const fetchCompanyId = async () => {
       try {
         const userId = auth().currentUser.uid;
-        const userDoc = await firestore().collection('businesses').where('userId', '==', userId).get();
+        const userDoc = await firestore()
+          .collection('businesses')
+          .where('userId', '==', userId)
+          .get();
         if (!userDoc.empty) {
           setCompanyId(userDoc.docs[0].id);
         } else {
@@ -32,7 +49,10 @@ const AddDriverScreen = () => {
         }
       } catch (error) {
         console.error('Failed to fetch company ID:', error);
-        Alert.alert('Error', 'Failed to fetch company ID. Please try again later.');
+        Alert.alert(
+          'Error',
+          'Failed to fetch company ID. Please try again later.'
+        );
       }
     };
 
@@ -56,6 +76,7 @@ const AddDriverScreen = () => {
       } else {
         const source = { uri: response.assets[0].uri };
         imageSetter(source.uri);
+        Alert.alert('Image Uploaded', 'Image uploaded successfully!');
       }
     });
   };
@@ -72,25 +93,47 @@ const AddDriverScreen = () => {
 
   // Validation functions
   const validateForm = async () => {
-    const passwordRegex = /^(?=.*[0-9])(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$/;
+    const passwordRegex =
+      /^(?=.*[0-9])(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$/;
 
     if (name.trim() === '') return 'Name is required.';
-    if (!/^[0-9]{10,11}$/.test(phoneNumber)) return 'Invalid phone number. Must be 10 or 11 digits.';
-    
+    if (!/^[0-9]{10,11}$/.test(phoneNumber))
+      return 'Invalid phone number. Must be 10 or 11 digits.';
+
     // Check if the phone number is unique
     const isUnique = await isPhoneNumberUnique();
-    if (!isUnique) return 'Phone number already exists. Please use a different number.';
+    if (!isUnique)
+      return 'Phone number already exists. Please use a different number.';
 
-    if (!passwordRegex.test(password)) return 'Password must be at least 8 characters long, contain at least one number, and one special character.';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Invalid email address.';
+    if (!passwordRegex.test(password))
+      return 'Password must be at least 8 characters long, contain at least one number, and one special character.';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return 'Invalid email address.';
     if (address.trim() === '') return 'Address is required.';
     if (gender === '') return 'Gender is required.';
-    if (profilePhoto.trim() === '') return 'Profile photo is required.';
-    if (licensePhoto.trim() === '') return 'License photo is required.';
+    if (!profilePhoto) return 'Profile photo is required.';
+    if (!licensePhoto) return 'License photo is required.';
     if (cnicNumber.trim() === '') return 'CNIC number is required.';
-    if (cnicFrontImage.trim() === '') return 'CNIC front image is required.';
-    if (cnicBackImage.trim() === '') return 'CNIC back image is required.';
+    if (!cnicFrontImage) return 'CNIC front image is required.';
+    if (!cnicBackImage) return 'CNIC back image is required.';
     return null;
+  };
+
+  const uploadImageToStorage = async (imageUri, docId, imageType) => {
+    if (!imageUri) return null;
+
+    try {
+      const filename = `${imageType}_${Date.now()}.jpg`;
+      const reference = storage().ref(`drivers/${docId}/${filename}`);
+      const task = reference.putFile(imageUri);
+      await task;
+      const downloadUrl = await reference.getDownloadURL();
+      console.log(`${imageType} image uploaded successfully:`, downloadUrl);
+      return downloadUrl;
+    } catch (error) {
+      console.error(`Error uploading ${imageType} image:`, error);
+      throw new Error(`Failed to upload ${imageType} image`);
+    }
   };
 
   const handleSubmit = async () => {
@@ -100,26 +143,40 @@ const AddDriverScreen = () => {
       return;
     }
 
+    setIsLoading(true);
+
     try {
-      await firestore().collection('drivers').add({
+      const docRef = firestore().collection('drivers').doc();
+      const docId = docRef.id;
+
+      const uploadPromises = [
+        uploadImageToStorage(profilePhoto, docId, 'profile'),
+        uploadImageToStorage(licensePhoto, docId, 'license'),
+        uploadImageToStorage(cnicFrontImage, docId, 'cnicFront'),
+        uploadImageToStorage(cnicBackImage, docId, 'cnicBack'),
+      ];
+
+      const [profileUrl, licenseUrl, cnicFrontUrl, cnicBackUrl] =
+        await Promise.all(uploadPromises);
+
+      await docRef.set({
         name,
         phoneNumber,
         password,
         email,
         address,
         gender,
-        profilePhoto,
-        licensePhoto,
+        profilePhoto: profileUrl,
+        licensePhoto: licenseUrl,
         cnicNumber,
-        cnicFrontImage,
-        cnicBackImage,
+        cnicFrontImage: cnicFrontUrl,
+        cnicBackImage: cnicBackUrl,
         companyId,
-        driverStatus: 'active', // Default value for driverStatus
-        requestStatus: 'send',  // Default value for requestStatus
+        driverStatus: 'active',
+        requestStatus: 'send',
         createdAt: firestore.FieldValue.serverTimestamp(),
       });
       Alert.alert('Success', 'Driver added successfully!');
-      // Reset form fields
       setName('');
       setPhoneNumber('');
       setPassword('');
@@ -133,21 +190,34 @@ const AddDriverScreen = () => {
       setCnicBackImage('');
     } catch (error) {
       console.error('Error adding driver:', error);
-      Alert.alert('Error', 'Failed to add driver. Please try again later.');
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to add driver. Please try again later.'
+      );
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.mainContent}>
-        
-        <TouchableOpacity onPress={() => handleImageUpload(setProfilePhoto)} style={styles.profileSection}>
-          <Icon name="account-circle" size={80} color="red" style={styles.profileIcon} />
-          {profilePhoto ? <Image source={{ uri: profilePhoto }} style={styles.profileImage} /> : null}
+        <TouchableOpacity
+          onPress={() => handleImageUpload(setProfilePhoto)}
+          style={styles.profileSection}
+        >
+          <Icon
+            name="account-circle"
+            size={80}
+            color="red"
+            style={styles.profileIcon}
+          />
+          {profilePhoto ? (
+            <Image source={{ uri: profilePhoto }} style={styles.profileImage} />
+          ) : null}
           <Text style={styles.uploadText}>Tap to Upload Profile Photo</Text>
         </TouchableOpacity>
 
-        
         <Text style={styles.sectionTitle}>Driver Registration</Text>
         <View style={styles.inputContainer}>
           <Icon name="account" size={20} color="red" style={styles.iconStyle} />
@@ -198,7 +268,12 @@ const AddDriverScreen = () => {
           />
         </View>
         <View style={styles.inputContainer}>
-          <Icon name="gender-male-female" size={20} color="red" style={styles.iconStyle} />
+          <Icon
+            name="gender-male-female"
+            size={20}
+            color="red"
+            style={styles.iconStyle}
+          />
           <Picker
             selectedValue={gender}
             onValueChange={(itemValue) => setGender(itemValue)}
@@ -211,16 +286,27 @@ const AddDriverScreen = () => {
           </Picker>
         </View>
 
-       
         <Text style={styles.sectionTitle}>License Photo</Text>
-        <TouchableOpacity onPress={() => handleImageUpload(setLicensePhoto)} style={styles.uploadButton}>
+        <TouchableOpacity
+          onPress={() => handleImageUpload(setLicensePhoto)}
+          style={styles.uploadButton}
+        >
           <Text style={styles.uploadButtonText}>Upload License Photo</Text>
         </TouchableOpacity>
-        {licensePhoto ? <Image source={{ uri: licensePhoto }} style={styles.uploadedImage} /> : null}
+        {licensePhoto ? (
+          <Image
+            source={{ uri: licensePhoto }}
+            style={styles.uploadedImage}
+          />
+        ) : null}
 
-       
         <View style={styles.inputContainer}>
-          <Icon name="card-account-details" size={20} color="red" style={styles.iconStyle} />
+          <Icon
+            name="card-account-details"
+            size={20}
+            color="red"
+            style={styles.iconStyle}
+          />
           <TextInput
             placeholder="CNIC Number"
             value={cnicNumber}
@@ -230,22 +316,44 @@ const AddDriverScreen = () => {
           />
         </View>
 
-       
         <Text style={styles.sectionTitle}>CNIC Front Image</Text>
-        <TouchableOpacity onPress={() => handleImageUpload(setCnicFrontImage)} style={styles.uploadButton}>
+        <TouchableOpacity
+          onPress={() => handleImageUpload(setCnicFrontImage)}
+          style={styles.uploadButton}
+        >
           <Text style={styles.uploadButtonText}>Upload CNIC Front Image</Text>
         </TouchableOpacity>
-        {cnicFrontImage ? <Image source={{ uri: cnicFrontImage }} style={styles.uploadedImage} /> : null}
+        {cnicFrontImage ? (
+          <Image
+            source={{ uri: cnicFrontImage }}
+            style={styles.uploadedImage}
+          />
+        ) : null}
 
-       
         <Text style={styles.sectionTitle}>CNIC Back Image</Text>
-        <TouchableOpacity onPress={() => handleImageUpload(setCnicBackImage)} style={styles.uploadButton}>
+        <TouchableOpacity
+          onPress={() => handleImageUpload(setCnicBackImage)}
+          style={styles.uploadButton}
+        >
           <Text style={styles.uploadButtonText}>Upload CNIC Back Image</Text>
         </TouchableOpacity>
-        {cnicBackImage ? <Image source={{ uri: cnicBackImage }} style={styles.uploadedImage} /> : null}
+        {cnicBackImage ? (
+          <Image
+            source={{ uri: cnicBackImage }}
+            style={styles.uploadedImage}
+          />
+        ) : null}
 
-        <TouchableOpacity onPress={handleSubmit} style={styles.submitButton}>
-          <Text style={styles.submitButtonText}>Submit</Text>
+        <TouchableOpacity
+          onPress={handleSubmit}
+          style={styles.submitButton}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.submitButtonText}>Submit</Text>
+          )}
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

@@ -1,0 +1,40 @@
+Looking at the screens, there's a 
+HomeScreen with a map and UI elements, 
+SearchResults for selecting ride options,
+ OrderScreen for tracking orders,
+  UserTrack for real-time tracking,
+   DestinationSearch for inputting locations, 
+   SplashScreen for the loading screen,
+    AuthLoadingScreen for role-based redirection, 
+    RoleScreen for selecting user roles,
+ and ProfileScreen for user profiles.
+
+ The flow starts with the App component rendering 
+ the AppNavigation within a Redux Provider.
+  The navigation stack begins with the SplashScreen,
+   then moves to AuthLoadingScreen which checks the user's role
+    and navigates accordingly. If not authenticated,
+     the user goes to RoleScreen to choose their role.
+      Depending on the role, they're directed to registration 
+      or login screens. After registration, users fill out 
+      their profile in ProfileScreen,
+  which then navigates them to their respective home screens.
+
+
+  popular Feature Options:
+
+Real-Time Chat between Patients and Drivers
+
+Emergency SOS with location sharing
+
+Medical History Form for patients
+
+Payment Gateway Integration
+
+Ride Scheduling for non-emergencies
+
+Medication Tracking during transport
+
+Route Optimization for emergencies
+
+Multi-language Support

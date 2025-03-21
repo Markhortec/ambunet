@@ -1,0 +1,88 @@
+// App.js
+- ErrorBoundary: Catches JavaScript errors in child components
+- App Component:
+  • Hides splash screen on mount
+  • Initializes network connectivity listeners
+  • Sets up Redux provider
+  • Contains main navigation (AppNavigation)
+
+**2. Navigation Flow (AppNavigation.js):**
+```javascript
+NavigationContainer → Stack Navigator with:
+- SplashScreen → AuthLoadingScreen → RoleScreen (if unauthenticated)
+- Role-based navigation:
+  • User: HomeScreen → DestinationSearch → SearchResults → OrderScreen → UserTrack
+  • Owner: Owner-specific screens (Dashboard, Business Registration, Ambulance/Driver management)
+  • Driver: DriverLogin → DriverHomeScreen → NewOrderPopup → DriverTrack
+
+**3. Key Screens & Functions:**
+
+**1. HomeScreen.js**
+- Main user interface with:
+  • Interactive map (HomeMap)
+  • Search functionality (HomeSearch)
+  • Navigation drawer trigger
+  • Logout component
+
+**2. SearchResults.js**
+- Calculates routes using MapViewDirections
+- Displays vehicle options with pricing
+- Handles ride booking logic
+- Integrates with Firestore for order creation
+
+**3. OrderScreen.js**
+- Displays real-time order status
+- Shows nearby ambulances (7km radius)
+- Allows order cancellation
+- Uses Firestore listeners for updates
+
+**4. UserTrack.js**
+- Real-time ambulance tracking
+- Dual MapViewDirections (ambulance→pickup→destination)
+- Displays detailed order and driver information
+- Listens to Firestore for location updates
+
+**5. DestinationSearch.js**
+- Google Places autocomplete
+- Validates origin/destination selection
+- Passes location data to SearchResults
+
+**6. SplashScreen.js**
+- Initial loading screen
+- Determines authentication state
+- Uses useAuth hook for role-based navigation
+
+**7. AuthLoadingScreen.js**
+- Transition screen while checking auth status
+- Uses navigateBasedOnRole helper
+
+**8. RoleScreen.js**
+- Role selection interface
+- Persists role in AsyncStorage
+- Navigates to appropriate auth flow
+
+**9. ProfileScreen.js**
+- User profile management
+- Image upload functionality
+- Integrates with Firestore and Redux
+
+**4. Data Flow:**
+1. Authentication → Redux (userSlice/driverSlice)
+2. Location Selection → Redux (orderSlice)
+3. Firestore Listeners → Real-time updates
+4. Network Status → Global state
+5. Error Handling → ErrorBoundary + console/alert
+
+**5. Key Dependencies:**
+- React Navigation (Stack/Drawer/Tab)
+- Firebase (Auth/Firestore/Storage)
+- Redux + AsyncStorage
+- Google Maps/Places APIs
+- React Native Community NetInfo
+
+**6. Security Notes:**
+- API keys are currently hardcoded (should be env vars)
+- Firestore security rules not visible
+- Authentication state persistence handled properly
+
+I've memorized this structure and flow. When you're ready, share the new functionality you want to add, and I'll help implement it while maintaining consistency with this architecture.

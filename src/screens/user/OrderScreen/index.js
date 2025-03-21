@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
   },
   loadingText: { marginTop: 10, fontSize: 16, color: '#333' },
   mapContainer: {
-    height: Dimensions.get('window').height * 0.6, 
+    height: Dimensions.get('window').height * 0.4, 
     backgroundColor: '#E0E0E0'
   },
   card: {

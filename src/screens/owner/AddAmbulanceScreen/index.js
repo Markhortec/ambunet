@@ -1,10 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { View, TextInput, StyleSheet, Alert, ScrollView, Image, Text, TouchableOpacity, SafeAreaView } from 'react-native';
+import {
+  View,
+  TextInput,
+  StyleSheet,
+  Alert,
+  ScrollView,
+  Image,
+  Text,
+  TouchableOpacity,
+  SafeAreaView,
+  Platform,
+  ActivityIndicator,
+} from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import * as ImagePicker from 'react-native-image-picker';
+// import DocumentPicker from 'react-native-document-picker';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
+import storage from '@react-native-firebase/storage';
 
 const ambulanceTypes = [
   { id: '0', type: 'Haice + AC + Oxy' },
@@ -29,6 +43,7 @@ const AddAmbulanceScreen = () => {
   const [interiorImage, setInteriorImage] = useState('');
   const [sideImage, setSideImage] = useState('');
   const [companyId, setCompanyId] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const fetchCompanyId = async () => {
@@ -76,40 +91,127 @@ const AddAmbulanceScreen = () => {
     });
   };
 
-  const addAmbulance = async () => {
-    if (type && registrationNumber && carPlateNumber && carBrand && frontImage && backImage && interiorImage && sideImage && companyId) {
-      try {
-        await firestore().collection('ambulances').add({
-          type,
-          registrationNumber,
-          carPlateNumber,
-          carBrand,
-          frontImage,
-          backImage,
-          interiorImage,
-          sideImage,
-          companyId,
-          createdAt: new Date(),
-          ambulanceStatus: 'active', // Added field with default value
-          requestStatus: 'send', // Added field with default value
-        });
+  // const getRealPathFromContentURI = async (uri) => {
+  //   if (Platform.OS === 'android' && uri.startsWith('content://')) {
+  //     try {
+  //       const result = await DocumentPicker.pick({
+  //         type: [DocumentPicker.types.images],
+  //         uri,
+  //         readContent: true,
+  //       });
+  //       return result.uri;
+  //     } catch (error) {
+  //       console.error('Error converting content URI:', error);
+  //       return uri; // Fallback to original URI
+  //     }
+  //   }
+  //   return uri; // Return original URI for iOS or non-content URIs
+  // };
 
-        Alert.alert('Success', 'Ambulance added successfully!');
-        // Reset form fields
-        setType('');
-        setRegistrationNumber('');
-        setCarPlateNumber('');
-        setCarBrand('');
-        setFrontImage('');
-        setBackImage('');
-        setInteriorImage('');
-        setSideImage('');
-      } catch (error) {
-        console.error('Error adding ambulance: ', error);
-        Alert.alert('Error', 'There was a problem adding the ambulance.');
-      }
-    } else {
+  const uploadImageToStorage = async (imageUri, docId, imageType) => {
+    if (!imageUri) return null;
+  
+    try {
+      // Get the real path for Android content URIs
+      const uploadUri = Platform.OS === 'android' && imageUri.startsWith('content://')
+        ? await getRealPathFromContentURI(imageUri)
+        : imageUri;
+  
+      // Generate a unique filename for the image
+      const filename = `${imageType}_${Date.now()}.jpg`;
+  
+      // Create a reference in Firebase Storage
+      const reference = storage().ref(`ambulances/${docId}/${filename}`);
+  
+      // Upload the file to Firebase Storage
+      const task = reference.putFile(uploadUri);
+  
+      // Monitor the upload progress (optional)
+      task.on('state_changed', (snapshot) => {
+        console.log(
+          `Upload is ${(snapshot.bytesTransferred / snapshot.totalBytes) * 100}% done`
+        );
+      });
+  
+      // Wait for the upload to complete
+      await task;
+  
+      // Get the download URL for the uploaded image
+      const downloadUrl = await reference.getDownloadURL();
+      console.log(`${imageType} image uploaded successfully:`, downloadUrl);
+  
+      return downloadUrl;
+    } catch (error) {
+      console.error(`Error uploading ${imageType} image:`, error);
+      throw new Error(`Failed to upload ${imageType} image`);
+    }
+  };
+
+  const addAmbulance = async () => {
+    if (
+      !type ||
+      !registrationNumber ||
+      !carPlateNumber ||
+      !carBrand ||
+      !frontImage ||
+      !backImage ||
+      !interiorImage ||
+      !sideImage ||
+      !companyId
+    ) {
       Alert.alert('Error', 'Please fill in all fields.');
+      return;
+    }
+  
+    setIsLoading(true);
+  
+    try {
+      // Create a new document in the "ambulances" collection
+      const docRef = firestore().collection('ambulances').doc();
+      const docId = docRef.id;
+  
+      // Upload all images to Firebase Storage
+      const uploadPromises = [
+        uploadImageToStorage(frontImage, docId, 'front'),
+        uploadImageToStorage(backImage, docId, 'back'),
+        uploadImageToStorage(interiorImage, docId, 'interior'),
+        uploadImageToStorage(sideImage, docId, 'side'),
+      ];
+  
+      // Wait for all uploads to complete
+      const [frontUrl, backUrl, interiorUrl, sideUrl] = await Promise.all(uploadPromises);
+  
+      // Save ambulance data to Firestore
+      await docRef.set({
+        type,
+        registrationNumber,
+        carPlateNumber,
+        carBrand,
+        frontImage: frontUrl,
+        backImage: backUrl,
+        interiorImage: interiorUrl,
+        sideImage: sideUrl,
+        companyId,
+        createdAt: firestore.FieldValue.serverTimestamp(),
+        ambulanceStatus: 'active',
+        requestStatus: 'send',
+      });
+  
+      Alert.alert('Success', 'Ambulance added successfully!');
+      // Reset form fields
+      setType('');
+      setRegistrationNumber('');
+      setCarPlateNumber('');
+      setCarBrand('');
+      setFrontImage('');
+      setBackImage('');
+      setInteriorImage('');
+      setSideImage('');
+    } catch (error) {
+      console.error('Error adding ambulance:', error);
+      Alert.alert('Error', error.message || 'There was a problem adding the ambulance.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -162,37 +264,38 @@ const AddAmbulanceScreen = () => {
           />
         </View>
 
-        {/* Image Uploads */}
         <Text style={styles.uploadText}>Upload Ambulance Images</Text>
         <TouchableOpacity onPress={() => handleImageUpload(setFrontImage)} style={styles.uploadButton}>
           <Text style={styles.uploadButtonText}>Front Image</Text>
         </TouchableOpacity>
         {frontImage && <Image source={{ uri: frontImage }} style={styles.imagePreview} />}
-        
+
         <TouchableOpacity onPress={() => handleImageUpload(setBackImage)} style={styles.uploadButton}>
           <Text style={styles.uploadButtonText}>Back Image</Text>
         </TouchableOpacity>
         {backImage && <Image source={{ uri: backImage }} style={styles.imagePreview} />}
-        
+
         <TouchableOpacity onPress={() => handleImageUpload(setInteriorImage)} style={styles.uploadButton}>
           <Text style={styles.uploadButtonText}>Interior Image</Text>
         </TouchableOpacity>
         {interiorImage && <Image source={{ uri: interiorImage }} style={styles.imagePreview} />}
-        
+
         <TouchableOpacity onPress={() => handleImageUpload(setSideImage)} style={styles.uploadButton}>
           <Text style={styles.uploadButtonText}>Side Image</Text>
         </TouchableOpacity>
         {sideImage && <Image source={{ uri: sideImage }} style={styles.imagePreview} />}
-        
-        {/* Submit Button */}
-        <TouchableOpacity onPress={addAmbulance} style={styles.submitButton}>
-          <Text style={styles.submitButtonText}>Add Ambulance</Text>
+
+        <TouchableOpacity onPress={addAmbulance} style={styles.submitButton} disabled={isLoading}>
+          {isLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.submitButtonText}>Add Ambulance</Text>
+          )}
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 };
-
 
 const styles = StyleSheet.create({
   container: {
@@ -250,7 +353,7 @@ const styles = StyleSheet.create({
     height: 200,
     borderRadius: 0,
     marginTop: 10,
-    alignSelf:'flex-start',
+    alignSelf: 'flex-start',
   },
   submitButton: {
     marginTop: 20,
