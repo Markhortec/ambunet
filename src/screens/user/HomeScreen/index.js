@@ -1,31 +1,87 @@
-import React, { useCallback } from "react";
-import { View, Dimensions, TouchableOpacity, StyleSheet } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { View, Dimensions, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import Ionicons from "react-native-vector-icons/Ionicons";
 import HomeMap from "../../../components/user/HomeMap";
 import InitialMessage from "../../../components/user/InitialMessage";
 import HomeSearch from "../../../components/user/HomeSearch";
 import Logout from "../../../components/owner/Logout";
-import Profile from "../../../components/user/Profile"; // Profile component
+import { useSelector, useDispatch } from "react-redux";
+import { getFirestore, doc, getDoc } from "@react-native-firebase/firestore";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { setOrderData } from "../../../redux/orderSlice";
 
 const HomeScreen = ({ navigation }) => {
-  // Prevent unnecessary re-renders
+  const orderId = useSelector((state) => state.order.orderId);
+  const [loading, setLoading] = useState(false);
+  const dispatch = useDispatch();
+
+  useEffect(() => {
+    const fetchOrderIdFromStorage = async () => {
+      // const storedOrderId = await AsyncStorage.getItem('orderID');
+      // if (storedOrderId) {
+      //   dispatch(setOrderData(storedOrderId));
+      // }
+    };
+
+    fetchOrderIdFromStorage();
+  }, [dispatch]);
+  useEffect(() => {
+    const fetchOrderDetails = async () => {
+      if (!orderId) {
+        console.log("No Order ID found in Redux.");
+        return;
+      }
+  
+      setLoading(true);
+      try {
+        const db = getFirestore();
+        const orderRef = doc(db, "orders", orderId);
+        const orderDoc = await getDoc(orderRef);
+  
+        if (orderDoc.exists) { // Use `exists` as a property, not a method
+          const orderData = orderDoc.data();
+          console.log("Fetched Order Details from Firestore:", orderData);
+  
+          if (orderData.status === "Pending") {
+            navigation.navigate("OrderScreen", {
+              id: orderId,
+              originPlace: orderData.route.origin,
+              destinationPlace: orderData.route.destination,
+              originName: orderData.route.origin.name,
+              destinationName: orderData.route.destination.name,
+              distance: orderData.route.distance,
+              price: orderData.vehicle.price,
+            });
+          }
+        } else {
+          console.log("No order found with the given Order ID:", orderId);
+        }
+      } catch (error) {
+        console.error("Error fetching order details:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+  
+    fetchOrderDetails();
+  }, [orderId, navigation]);
+
   const openDrawer = useCallback(() => {
     navigation.openDrawer();
   }, [navigation]);
 
   return (
     <View style={styles.container}>
-      {/* Sidebar Menu Button */}
       <TouchableOpacity style={styles.menuButton} onPress={openDrawer}>
         <Ionicons name="menu" size={30} color="black" />
       </TouchableOpacity>
 
-      {/* Map Section */}
       <View style={styles.mapContainer}>
         <HomeMap />
       </View>
 
-      {/* Bottom UI Elements */}
+      {loading && <ActivityIndicator size="large" color="#0000ff" />}
+
       <View style={styles.bottomContainer}>
         <Logout navigation={navigation} />
         <InitialMessage />
@@ -59,10 +115,6 @@ const styles = StyleSheet.create({
   bottomContainer: {
     paddingHorizontal: 10,
     paddingVertical: 10,
-  },
-  profileContainer: {
-    marginTop: 10, // Adds spacing between HomeSearch and Profile
-    alignItems: "center",
   },
 });
 

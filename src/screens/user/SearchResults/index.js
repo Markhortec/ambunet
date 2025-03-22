@@ -14,15 +14,14 @@ import {
 import { useRoute, useNavigation } from '@react-navigation/native';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
-import storage from '@react-native-firebase/storage';
-import haversine from 'haversine-distance';
 import Geocoding from 'react-native-geocoding';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { useDispatch } from 'react-redux';
-import { setOrderData } from '../../../redux/orderSlice';
 import typesData from '../../../assets/data/types';
 import MapView, { PROVIDER_GOOGLE, Marker } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
+import { useDispatch,useSelector } from 'react-redux';
+import { setOrderData } from '../../../redux/orderSlice';
+import asyncStorage from '@react-native-async-storage/async-storage';
 
 // Initialize Geocoding with your API key
 Geocoding.init('AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM');
@@ -38,10 +37,10 @@ const SearchResults = () => {
   const [destinationName, setDestinationName] = useState('');
   const [loading, setLoading] = useState(true);
   const [routeError, setRouteError] = useState(null);
-
+  const dispatch = useDispatch();
+  const order = useSelector((state)=> state.order.order)
   const route = useRoute();
   const navigation = useNavigation();
-  const dispatch = useDispatch();
   const animatedButtonScale = useRef(new Animated.Value(1)).current;
 
   // Destructure origin & destination details from route params
@@ -131,65 +130,65 @@ const SearchResults = () => {
     if (!distance || !baseRate) return 0;
     return parseFloat((baseRate * distance).toFixed(2));
   };
-  const handleBookRide = async () => {
-    if (!type) {
-      Alert.alert('Select Vehicle', 'Please choose a vehicle type to continue');
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      console.log("Booking ride...");
-      const user = auth().currentUser;
-      const selectedType = typesData.find((t) => t.type === type);
-      
-      // Create order data. If desired, you can also create a sub-collection (e.g., tracking) later.
-      const orderData = {
-        user: {
-          id: user.uid,
-          name: userData.name,
-          phone: userData.phoneNumber,
-        },
-        route: {
-          origin: { ...origin, name: originName },
-          destination: { ...destination, name: destinationName },
-          distance: distance ?? 0,    
-          duration: duration ?? 0,    
-        },
-        vehicle: {
-          type: selectedType.type,
-          price: calculatePrice(selectedType.baseRatePerKm),
-        },
-        status: 'pending',
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      };
-      console.log("Order Data:", orderData);
-      // Create the order in the unified "orders" collection.
-      const orderRef = await firestore().collection('orders').add(orderData);
-      console.log("Order Reference:", orderRef);
-      dispatch(setOrderData({
-        orderId: orderRef.id,
-        ...orderData,
-        createdAt: new Date().toISOString(),
-      }));
+const handleBookRide = async () => {
+  if (!type) {
+    Alert.alert('Select Vehicle', 'Please choose a vehicle type to continue');
+    return;
+  }
 
-      navigation.navigate('OrderScreen', {
-        id: orderRef.id,
-        originPlace,
-        destinationPlace,
-        originName,
-        destinationName,
-        distance, // Pass distance
-        price: orderData.vehicle.price,        // Pass price correctly
-      });
-      
-    } catch (error) {
-      console.error('Order Creation Error:', error);
-      Alert.alert('Order Error', `Failed to create order: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
+  try {
+    setLoading(true);
+    console.log("Booking ride...");
+    const user = auth().currentUser;
+    const selectedType = typesData.find((t) => t.type === type);
+
+    // Create order data
+    const orderData = {
+      user: {
+        id: user.uid,
+        name: userData.name,
+        phone: userData.phoneNumber,
+      },
+      route: {
+        origin: { ...origin, name: originName },
+        destination: { ...destination, name: destinationName },
+        distance: distance ?? 0,
+        duration: duration ?? 0,
+      },
+      vehicle: {
+        type: selectedType.type,
+        price: calculatePrice(selectedType.baseRatePerKm),
+      },
+      status: 'Pending',
+      createdAt: firestore.FieldValue.serverTimestamp(),
+    };
+
+    console.log("Order Data:", orderData);
+
+    // Save the order to Firestore
+    const orderRef = await firestore().collection('orders').add(orderData);
+    console.log("Order Reference ID:", orderRef.id);
+   await asyncStorage.setItem('orderID', orderRef.id);
+    // Dispatch the order ID to Redux
+    dispatch(setOrderData(orderRef.id));
+
+    // Navigate to the OrderScreen
+    navigation.navigate('OrderScreen', {
+      id: orderRef.id,
+      originPlace,
+      destinationPlace,
+      originName,
+      destinationName,
+      distance, // Pass distance
+      price: orderData.vehicle.price, // Pass price
+    });
+  } catch (error) {
+    console.error('Order Creation Error:', error);
+    Alert.alert('Order Error', `Failed to create order: ${error.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
     
   // Return an image based on the vehicle type (using the first word)
   const getVehicleImage = (type) => {

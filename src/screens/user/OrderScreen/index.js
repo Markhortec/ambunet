@@ -53,9 +53,9 @@ const OrderScreen = () => {
       .onSnapshot(doc => {
         if (doc.exists) {
           const data = doc.data();
-          setOrder(data);
+       
           // Navigate to UserTrack if the order is accepted.
-          if (data.status === 'Accepted') {
+          if (data.status === 'In Progress') {
             navigation.navigate('UserTrack', { orderId: id });
           }
         }
