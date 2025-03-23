@@ -32,20 +32,30 @@ const DriverTrack = ({ route, navigation }) => {
         if (doc.exists) {
           const data = doc.data();
           setOrderData(data);
-          setCurrentLocation(data.driverLocation); // Expected to be a map with { latitude, longitude }
           setRideStatus(data.status);
+
+          // Extract driver's current location
+          if (data.driverLocation) {
+            setCurrentLocation({
+              latitude: data.driverLocation.latitude,
+              longitude: data.driverLocation.longitude,
+            });
+          }
+
           // Extract origin and destination from the nested route object
           if (data.route) {
             if (data.route.origin) {
               setOrigin({
-                latitude: data.route.origin.lat,
-                longitude: data.route.origin.lng,
+                latitude: data.route.origin.latitude,
+                longitude: data.route.origin.longitude,
+                name: data.route.origin.name || "Pickup Location",
               });
             }
             if (data.route.destination) {
               setDestination({
-                latitude: data.route.destination.lat,
-                longitude: data.route.destination.lng,
+                latitude: data.route.destination.latitude,
+                longitude: data.route.destination.longitude,
+                name: data.route.destination.name || "Destination",
               });
             }
           }
@@ -70,6 +80,14 @@ const DriverTrack = ({ route, navigation }) => {
   if (loading || !orderData || !currentLocation) {
     return (
       <ActivityIndicator size="large" color="#0000ff" style={styles.loader} />
+    );
+  }
+
+  if (!origin || !destination) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.errorText}>Waiting for valid location data...</Text>
+      </View>
     );
   }
 
@@ -106,8 +124,8 @@ const DriverTrack = ({ route, navigation }) => {
         {/* Directions from Driver to Pickup */}
         {currentLocation && origin && (
           <MapViewDirections
-            origin={currentLocation}
-            destination={origin}
+            origin={`${currentLocation.latitude},${currentLocation.longitude}`}
+            destination={`${origin.latitude},${origin.longitude}`}
             apikey={GOOGLE_MAPS_APIKEY}
             strokeWidth={4}
             strokeColor="blue"
@@ -116,8 +134,8 @@ const DriverTrack = ({ route, navigation }) => {
         {/* Directions from Pickup to Destination */}
         {origin && destination && (
           <MapViewDirections
-            origin={origin}
-            destination={destination}
+            origin={`${origin.latitude},${origin.longitude}`}
+            destination={`${destination.latitude},${destination.longitude}`}
             apikey={GOOGLE_MAPS_APIKEY}
             strokeWidth={4}
             strokeColor="green"
@@ -134,10 +152,10 @@ const DriverTrack = ({ route, navigation }) => {
         </Text>
         <Text style={styles.detailTitle}>Trip Details</Text>
         <Text style={styles.detailText}>
-          Pickup Location: {orderData.route?.origin?.name || "N/A"}
+          Pickup Location: {origin.name || "N/A"}
         </Text>
         <Text style={styles.detailText}>
-          Drop-off Location: {orderData.route?.destination?.name || "N/A"}
+          Drop-off Location: {destination.name || "N/A"}
         </Text>
         <Text style={styles.detailText}>
           Vehicle Type: {orderData.vehicle?.type || "N/A"}
@@ -202,6 +220,17 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#F5F5F5",
+  },
+  errorText: {
+    fontSize: 16,
+    color: "#FF4444",
+    textAlign: "center",
   },
 });
 

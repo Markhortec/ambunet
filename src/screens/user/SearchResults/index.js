@@ -14,14 +14,16 @@ import {
 import { useRoute, useNavigation } from '@react-navigation/native';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
+import storage from '@react-native-firebase/storage';
+import haversine from 'haversine-distance';
 import Geocoding from 'react-native-geocoding';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import { useDispatch } from 'react-redux';
+import { setOrderData } from '../../../redux/orderSlice';
 import typesData from '../../../assets/data/types';
 import MapView, { PROVIDER_GOOGLE, Marker } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
-import { useDispatch,useSelector } from 'react-redux';
-import { setOrderData } from '../../../redux/orderSlice';
-import asyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Initialize Geocoding with your API key
 Geocoding.init('AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM');
@@ -37,16 +39,20 @@ const SearchResults = () => {
   const [destinationName, setDestinationName] = useState('');
   const [loading, setLoading] = useState(true);
   const [routeError, setRouteError] = useState(null);
-  const dispatch = useDispatch();
-  const order = useSelector((state)=> state.order.order)
+
   const route = useRoute();
   const navigation = useNavigation();
+  const dispatch = useDispatch(); 
   const animatedButtonScale = useRef(new Animated.Value(1)).current;
 
   // Destructure origin & destination details from route params
   const { originPlace, destinationPlace } = route.params;
   const origin = originPlace.details.geometry.location;
   const destination = destinationPlace.details.geometry.location;
+
+  // Convert origin and destination to strings for MapViewDirections
+  const originCoords = `${origin.lat},${origin.lng}`;
+  const destinationCoords = `${destination.lat},${destination.lng}`;
 
   useEffect(() => {
     const initializeScreen = async () => {
@@ -130,65 +136,83 @@ const SearchResults = () => {
     if (!distance || !baseRate) return 0;
     return parseFloat((baseRate * distance).toFixed(2));
   };
-const handleBookRide = async () => {
-  if (!type) {
-    Alert.alert('Select Vehicle', 'Please choose a vehicle type to continue');
-    return;
-  }
 
-  try {
-    setLoading(true);
-    console.log("Booking ride...");
-    const user = auth().currentUser;
-    const selectedType = typesData.find((t) => t.type === type);
-
-    // Create order data
-    const orderData = {
-      user: {
-        id: user.uid,
-        name: userData.name,
-        phone: userData.phoneNumber,
-      },
-      route: {
-        origin: { ...origin, name: originName },
-        destination: { ...destination, name: destinationName },
-        distance: distance ?? 0,
-        duration: duration ?? 0,
-      },
-      vehicle: {
-        type: selectedType.type,
-        price: calculatePrice(selectedType.baseRatePerKm),
-      },
-      status: 'Pending',
-      createdAt: firestore.FieldValue.serverTimestamp(),
-    };
-
-    console.log("Order Data:", orderData);
-
-    // Save the order to Firestore
-    const orderRef = await firestore().collection('orders').add(orderData);
-    console.log("Order Reference ID:", orderRef.id);
-   await asyncStorage.setItem('orderID', orderRef.id);
-    // Dispatch the order ID to Redux
-    dispatch(setOrderData(orderRef.id));
-
-    // Navigate to the OrderScreen
-    navigation.navigate('OrderScreen', {
-      id: orderRef.id,
-      originPlace,
-      destinationPlace,
-      originName,
-      destinationName,
-      distance, // Pass distance
-      price: orderData.vehicle.price, // Pass price
-    });
-  } catch (error) {
-    console.error('Order Creation Error:', error);
-    Alert.alert('Order Error', `Failed to create order: ${error.message}`);
-  } finally {
-    setLoading(false);
-  }
-};
+  const handleBookRide = async () => {
+    if (!type) {
+      Alert.alert('Select Vehicle', 'Please choose a vehicle type to continue');
+      return;
+    }
+  
+    try {
+      setLoading(true);
+      console.log("Booking ride...");
+      const user = auth().currentUser;
+      const selectedType = typesData.find((t) => t.type === type);
+  
+      // Create order data
+      const orderData = {
+        user: {
+          id: user.uid,
+          name: userData.name,
+          phone: userData.phoneNumber,
+        },
+        route: {
+          origin: {
+            name: originName,
+            latitude: origin.lat,
+            longitude: origin.lng,
+            placeDetails: originPlace.details, // Save the entire originPlace details
+          },
+          destination: {
+            name: destinationName,
+            latitude: destination.lat,
+            longitude: destination.lng,
+            placeDetails: destinationPlace.details, // Save the entire destinationPlace details
+          },
+          distance: distance ?? 0,
+          duration: duration ?? 0,
+        },
+        vehicle: {
+          type: selectedType.type,
+          price: calculatePrice(selectedType.baseRatePerKm),
+        },
+        status: 'Pending',
+        createdAt: firestore.FieldValue.serverTimestamp(),
+      };
+  
+      console.log("Order Data:", orderData);
+  
+      // Save the order to Firestore
+      const orderRef = await firestore().collection('orders').add(orderData);
+      dispatch(setOrderData(orderRef.id));
+      await AsyncStorage.setItem('orderId', orderRef.id);
+      // Log the order ID and other details
+      console.log("Order ID:", orderRef.id);
+      console.log("Origin Place:", originPlace);
+      console.log("Destination Place:", destinationPlace);
+      console.log("Origin Name:", originName);
+      console.log("Destination Name:", destinationName);
+      console.log("Distance:", distance);
+      console.log("Price:", orderData.vehicle.price);
+  
+      // Navigate to the OrderScreen with the necessary parameters
+      navigation.navigate('OrderScreen', {
+        id: orderRef.id,
+        originPlace: originPlace, // Pass the entire originPlace object
+        destinationPlace: destinationPlace, // Pass the entire destinationPlace object
+        originName: originName,
+        destinationName: destinationName,
+        distance: distance,
+        price: orderData.vehicle.price,
+      });
+  
+    } catch (error) {
+      console.error('Order Creation Error:', error);
+      Alert.alert('Order Error', `Failed to create order: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
     
   // Return an image based on the vehicle type (using the first word)
   const getVehicleImage = (type) => {
@@ -209,16 +233,6 @@ const handleBookRide = async () => {
       </View>
     );
   }
-
-  const originCoords = {
-    latitude: origin.lat,
-    longitude: origin.lng,
-  };
-  
-  const destinationCoords = {
-    latitude: destination.lat,
-    longitude: destination.lng,
-  };
 
   return (
     <View style={styles.container}>
@@ -268,7 +282,7 @@ const handleBookRide = async () => {
           )}
 
           {/* Origin Marker */}
-          <Marker coordinate={originCoords}>
+          <Marker coordinate={{ latitude: origin.lat, longitude: origin.lng }}>
             <View style={[styles.markerBubble, { backgroundColor: '#e74c3c' }]}>
               <Ionicons name="location" size={20} color="#fff" />
               <View style={[styles.markerArrow, { backgroundColor: '#e74c3c' }]} />
@@ -276,7 +290,7 @@ const handleBookRide = async () => {
           </Marker>
 
           {/* Destination Marker */}
-          <Marker coordinate={destinationCoords}>
+          <Marker coordinate={{ latitude: destination.lat, longitude: destination.lng }}>
             <View style={[styles.markerBubble, { backgroundColor: '#e74c3c' }]}>
               <Ionicons name="flag" size={18} color="#fff" />
               <View style={[styles.markerArrow, { backgroundColor: '#e74c3c' }]} />

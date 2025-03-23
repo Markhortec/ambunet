@@ -1,9 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, Alert, ScrollView, TouchableOpacity, SafeAreaView, ActivityIndicator, Image } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  Alert,
+  ScrollView,
+  TouchableOpacity,
+  SafeAreaView,
+  ActivityIndicator,
+  Image,
+} from 'react-native';
 import * as ImagePicker from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
+import storage from '@react-native-firebase/storage';
 
 const BusinessRegistrationScreen = ({ navigation }) => {
   const [phone, setPhone] = useState('');
@@ -13,6 +25,7 @@ const BusinessRegistrationScreen = ({ navigation }) => {
   const [address, setAddress] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [loading, setLoading] = useState(true);
+  const [isRegistering, setIsRegistering] = useState(false); // Loading state
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -39,6 +52,30 @@ const BusinessRegistrationScreen = ({ navigation }) => {
     fetchUserData();
   }, []);
 
+  const uploadImageToStorage = async (imageUri, companyId, imageType) => {
+    if (!imageUri) return null;
+
+    try {
+      const filename = `${imageType}_${Date.now()}.jpg`;
+      const reference = storage().ref(`businesses/${companyId}/${filename}`);
+      const task = reference.putFile(imageUri);
+
+      task.on('state_changed', (snapshot) => {
+        console.log(
+          `Upload is ${(snapshot.bytesTransferred / snapshot.totalBytes) * 100}% done`
+        );
+      });
+
+      await task;
+      const downloadUrl = await reference.getDownloadURL();
+      console.log(`${imageType} image uploaded successfully:`, downloadUrl);
+      return downloadUrl;
+    } catch (error) {
+      console.error(`Error uploading ${imageType} image:`, error);
+      throw new Error(`Failed to upload ${imageType} image`);
+    }
+  };
+
   const handleImageUpload = (imageSetter) => {
     const options = {
       mediaType: 'photo',
@@ -63,38 +100,58 @@ const BusinessRegistrationScreen = ({ navigation }) => {
   const registerBusiness = async () => {
     if (businessName && logo && ownerPhoto && address) {
       try {
+        setIsRegistering(true); // Start loading
+  
         const user = auth().currentUser;
         if (!user) {
           Alert.alert('Error', 'User not authenticated.');
+          setIsRegistering(false); // Stop loading on error
           return;
         }
-
+  
         const userId = user.uid;
         const businessRef = firestore().collection('businesses').doc();
         const companyId = businessRef.id;
-
+  
+        const [logoUrl, ownerPhotoUrl] = await Promise.all([
+          uploadImageToStorage(logo, companyId, 'logo'),
+          uploadImageToStorage(ownerPhoto, companyId, 'ownerPhoto'),
+        ]);
+  
+        // Save business data with new fields
         await businessRef.set({
           companyId,
           ownerName,
           phone,
           businessName,
-          logo,
-          ownerPhoto,
+          logo: logoUrl,
+          ownerPhoto: ownerPhotoUrl,
           address,
           userId,
           createdAt: firestore.FieldValue.serverTimestamp(),
+          requestStatus: 'send', // Default value for requestStatus
+          message: 'Account created successfully', // Default value for message
+          balance: 0, // Default value for balance
         });
-        Alert.alert('Success', 'Business registered successfully!');
-        navigation.navigate('OwnerTabNavigator');
-        
+  
+        Alert.alert(
+          'Success',
+          `Business registered successfully! Your business "${businessName}" is now pending approval.`,
+        );
+  
+        // Navigate to the next screen after a short delay
+        setTimeout(() => {
+          navigation.navigate('OwnerTabNavigator');
+        }, 1000); // Delay navigation for 1 second
       } catch (error) {
         Alert.alert('Error', `Failed to register business. Error: ${error.message}`);
+      } finally {
+        setIsRegistering(false); // Stop loading in all cases
       }
     } else {
       Alert.alert('Error', 'Please fill in all fields.');
     }
   };
-
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -106,7 +163,6 @@ const BusinessRegistrationScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.mainContent}>
-     
         <View style={styles.uploadSection}>
           <Text style={styles.sectionTitle}>Upload Owner Photo</Text>
           <TouchableOpacity onPress={() => handleImageUpload(setOwnerPhoto)} style={styles.uploadButton}>
@@ -115,7 +171,6 @@ const BusinessRegistrationScreen = ({ navigation }) => {
           {ownerPhoto && <Image source={{ uri: ownerPhoto }} style={styles.imagePreview} />}
         </View>
 
-     
         <View style={styles.uploadSection}>
           <Text style={styles.sectionTitle}>Upload Business Logo</Text>
           <TouchableOpacity onPress={() => handleImageUpload(setLogo)} style={styles.uploadButton}>
@@ -134,7 +189,6 @@ const BusinessRegistrationScreen = ({ navigation }) => {
           />
         </View>
 
-   
         <View style={styles.inputContainer}>
           <Icon name="phone" size={20} color="#333" style={styles.iconStyle} />
           <TextInput
@@ -155,7 +209,6 @@ const BusinessRegistrationScreen = ({ navigation }) => {
           />
         </View>
 
-
         <View style={styles.inputContainer}>
           <Icon name="map-marker" size={20} color="#333" style={styles.iconStyle} />
           <TextInput
@@ -166,9 +219,16 @@ const BusinessRegistrationScreen = ({ navigation }) => {
           />
         </View>
 
-   
-        <TouchableOpacity style={styles.submitButton} onPress={registerBusiness}>
-          <Text style={styles.submitButtonText}>Register</Text>
+        <TouchableOpacity
+          style={styles.submitButton}
+          onPress={registerBusiness}
+          disabled={isRegistering} // Disable button while registering
+        >
+          {isRegistering ? (
+            <ActivityIndicator color="#FFFFFF" /> // Show loading indicator
+          ) : (
+            <Text style={styles.submitButtonText}>Register</Text>
+          )}
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -201,7 +261,7 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     marginBottom: 12,
     alignItems: 'center',
-    elevation: 3, 
+    elevation: 3,
   },
   uploadButtonText: {
     color: '#FFFFFF',
@@ -211,7 +271,7 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     marginBottom: 20,
-    borderRadius: 60, 
+    borderRadius: 60,
     borderColor: '#B0BEC5',
     borderWidth: 1,
   },
@@ -225,7 +285,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 20,
     backgroundColor: '#FFFFFF',
-    elevation: 2, 
+    elevation: 2,
   },
   input: {
     flex: 1,
@@ -241,7 +301,7 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     borderRadius: 30,
     alignItems: 'center',
-    elevation: 3, 
+    elevation: 3,
   },
   submitButtonText: {
     color: '#FFFFFF',

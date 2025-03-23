@@ -79,44 +79,56 @@ const AssignAmbulanceScreen = () => {
   const assignAmbulance = async () => {
     if (selectedDriver && selectedAmbulance) {
       try {
+        // Fetch driver details
+        const driverDoc = await firestore().collection('drivers').doc(selectedDriver).get();
+        const driverName = driverDoc.data().name;
+  
+        // Fetch ambulance details
+        const ambulanceDoc = await firestore().collection('ambulances').doc(selectedAmbulance).get();
+        const ambulanceRegistrationNumber = ambulanceDoc.data().registrationNumber;
+  
         // Update the driver document to include the assigned ambulance
         await firestore().collection('drivers').doc(selectedDriver).update({
           assignedAmbulance: selectedAmbulance,
         });
-
+  
         // Update the ambulance document to include the assigned driver
         await firestore().collection('ambulances').doc(selectedAmbulance).update({
           assignedDriver: selectedDriver,
         });
-
+  
         // Fetch updated data to reflect changes
         const driversSnapshot = await firestore()
           .collection('drivers')
           .where('companyId', '==', companyId)
           .get();
-
+  
         const driversData = driversSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
         }));
-
+  
         const ambulancesSnapshot = await firestore()
           .collection('ambulances')
           .where('companyId', '==', companyId)
           .get();
-
+  
         const ambulancesData = ambulancesSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
         }));
-
+  
         const unassignedDrivers = driversData.filter(driver => !driver.assignedAmbulance);
         const unassignedAmbulances = ambulancesData.filter(ambulance => !ambulance.assignedDriver);
-
+  
         setDrivers(unassignedDrivers);
         setAmbulances(unassignedAmbulances);
-
-        Alert.alert('Success', `Ambulance ${selectedAmbulance} assigned to driver ${selectedDriver}!`);
+  
+        // Show success alert with driver name and ambulance registration number
+        Alert.alert(
+          'Success',
+          `Ambulance "${ambulanceRegistrationNumber}" assigned to driver "${driverName}"!`,
+        );
       } catch (error) {
         console.error('Error assigning ambulance:', error);
         Alert.alert('Error', 'Failed to assign ambulance. Please try again later.');

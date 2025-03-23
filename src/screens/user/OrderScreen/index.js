@@ -11,7 +11,10 @@ import {
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import firestore from '@react-native-firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useDispatch } from 'react-redux'; // Import useDispatch for Redux
 import OrderMap from '../../../components/user/OrderMap';
+import { resetOrderData } from '../../../redux/orderSlice'; // Import the resetOrderData action
 
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const R = 6371; // Earth radius in km
@@ -32,15 +35,15 @@ const OrderScreen = () => {
   const [loading, setLoading] = useState(true);
   const route = useRoute();
   const navigation = useNavigation();
+  const dispatch = useDispatch(); // Initialize Redux dispatch
 
   const { id, originPlace, destinationPlace, originName, destinationName, distance, price } = route.params;
 
-  // Extract and validate origin coordinates
+  // Extract coordinates
   const originLatitude = originPlace?.details?.geometry?.location?.lat;
   const originLongitude = originPlace?.details?.geometry?.location?.lng;
   const origin = { latitude: originLatitude, longitude: originLongitude };
 
-  // Extract destination coordinates
   const destinationLatitude = destinationPlace?.details?.geometry?.location?.lat;
   const destinationLongitude = destinationPlace?.details?.geometry?.location?.lng;
   const destination = { latitude: destinationLatitude, longitude: destinationLongitude };
@@ -53,7 +56,7 @@ const OrderScreen = () => {
       .onSnapshot(doc => {
         if (doc.exists) {
           const data = doc.data();
-       
+          setOrder(data);
           // Navigate to UserTrack if the order is accepted.
           if (data.status === 'In Progress') {
             navigation.navigate('UserTrack', { orderId: id });
@@ -64,7 +67,7 @@ const OrderScreen = () => {
         console.error('Error fetching order:', error);
         setLoading(false);
       });
-    
+
     return () => unsubscribeOrder();
   }, [id, navigation]);
 
@@ -76,7 +79,7 @@ const OrderScreen = () => {
     }
 
     const unsubscribeDrivers = firestore()
-      .collection('onDuty')
+      .collection('duty')
       .where('status', '==', 'Online')
       .onSnapshot(snapshot => {
         const driversData = [];
@@ -89,9 +92,6 @@ const OrderScreen = () => {
               driver.latitude,
               driver.longitude
             );
-            // Debug log to help determine the computed distance.
-            console.log(`Driver ${driver.ambulanceRegNo}: ${distanceCalc.toFixed(2)} km away`);
-
             if (distanceCalc <= 7) {
               driversData.push({
                 ...driver,
@@ -110,7 +110,7 @@ const OrderScreen = () => {
   }, [origin.latitude, origin.longitude]);
 
   // Confirm cancellation using an alert dialog.
-  const confirmCancelOrder = () => {
+  const confirmCancelOrder = async () => {
     Alert.alert(
       'Cancel Booking',
       'Are you sure you want to cancel your booking?',
@@ -120,10 +120,22 @@ const OrderScreen = () => {
           text: 'Yes', 
           onPress: async () => {
             try {
-              await firestore().collection('orders').doc(id).delete();
+              // Update order status to "Cancelled" in Firestore
+              await firestore()
+                .collection('orders')
+                .doc(id)
+                .update({ status: 'Cancelled' });
+
+              // Clear order from AsyncStorage
+              await AsyncStorage.removeItem('OrderId');
+
+              // Clear order from Redux (if applicable)
+              dispatch(resetOrderData());
+
               Alert.alert('Booking Cancelled', 'Your booking has been cancelled.');
               navigation.navigate('HomeScreen');
             } catch (error) {
+              console.error('Error cancelling order:', error);
               Alert.alert('Error', 'Failed to cancel the booking.');
             }
           } 

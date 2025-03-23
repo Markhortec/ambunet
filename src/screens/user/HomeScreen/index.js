@@ -17,7 +17,8 @@ const HomeScreen = ({ navigation }) => {
 
   useEffect(() => {
     const fetchOrderIdFromStorage = async () => {
-      // const storedOrderId = await AsyncStorage.getItem('orderID');
+      // await AsyncStorage.clear();
+      // const storedOrderId = await AsyncStorage.getItem('orderId');
       // if (storedOrderId) {
       //   dispatch(setOrderData(storedOrderId));
       // }
@@ -25,6 +26,7 @@ const HomeScreen = ({ navigation }) => {
 
     fetchOrderIdFromStorage();
   }, [dispatch]);
+
   useEffect(() => {
     const fetchOrderDetails = async () => {
       if (!orderId) {
@@ -38,15 +40,45 @@ const HomeScreen = ({ navigation }) => {
         const orderRef = doc(db, "orders", orderId);
         const orderDoc = await getDoc(orderRef);
   
-        if (orderDoc.exists) { // Use `exists` as a property, not a method
+        if (orderDoc.exists) {
           const orderData = orderDoc.data();
           console.log("Fetched Order Details from Firestore:", orderData);
   
           if (orderData.status === "Pending") {
+            // Ensure the originPlace and destinationPlace are structured correctly
+            const originPlace = {
+              details: {
+                geometry: {
+                  location: {
+                    lat: orderData.route.origin.latitude,
+                    lng: orderData.route.origin.longitude,
+                  },
+                },
+                formatted_address: orderData.route.origin.name,
+              },
+            };
+  
+            const destinationPlace = {
+              details: {
+                geometry: {
+                  location: {
+                    lat: orderData.route.destination.latitude,
+                    lng: orderData.route.destination.longitude,
+                  },
+                },
+                formatted_address: orderData.route.destination.name,
+              },
+            };
+  
+            // Log the structured data for debugging
+            console.log("Structured Origin Place:", originPlace);
+            console.log("Structured Destination Place:", destinationPlace);
+  
+            // Navigate to OrderScreen with the structured data
             navigation.navigate("OrderScreen", {
               id: orderId,
-              originPlace: orderData.route.origin,
-              destinationPlace: orderData.route.destination,
+              originPlace: originPlace, // Pass the structured originPlace
+              destinationPlace: destinationPlace, // Pass the structured destinationPlace
               originName: orderData.route.origin.name,
               destinationName: orderData.route.destination.name,
               distance: orderData.route.distance,

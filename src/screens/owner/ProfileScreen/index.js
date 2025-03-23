@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, StyleSheet, Alert, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -7,6 +6,7 @@ import firestore from '@react-native-firebase/firestore';
 import { fetchUserData, setUserInfo } from '../../../redux/userSlice';
 import { launchImageLibrary } from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import storage from '@react-native-firebase/storage';
 
 const ProfileScreen = ({ navigation }) => {
   const dispatch = useDispatch();
@@ -15,7 +15,8 @@ const ProfileScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [ownerPhoto, setOwnerPhoto] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // Loading state for fetching data
+  const [isSaving, setIsSaving] = useState(false); // Loading state for saving profile
   const [role, setRole] = useState('');
 
   // Load user data and role
@@ -42,7 +43,7 @@ const ProfileScreen = ({ navigation }) => {
     }
   }, [userInfo]);
 
-  // Handle image upload
+  // Function to handle image upload
   const handleImageUpload = () => {
     const options = {
       mediaType: 'photo',
@@ -57,75 +58,117 @@ const ProfileScreen = ({ navigation }) => {
       } else {
         const uri = response.assets[0]?.uri;
         if (uri) {
-          setOwnerPhoto(uri);
+          setOwnerPhoto(uri); // Set the selected image URI
         }
       }
     });
   };
 
-  // Save profile and navigate based on role
- // Save profile and navigate based on role
-const handleSaveProfile = async () => {
-  if (!userInfo.uid) {
-    Alert.alert('Error', 'User ID not found.');
-    return;
-  }
+  const uploadImageToStorage = async (imageUri, userId, imageType) => {
+    if (!imageUri) return null;
 
-  if (name.trim() === '' || email.trim() === '' || phoneNumber.trim() === '') {
-    Alert.alert('Validation Error', 'Please fill in all fields.');
-    return;
-  }
+    try {
+      const filename = `${imageType}_${Date.now()}.jpg`;
+      const reference = storage().ref(`users/${userId}/${filename}`);
+      const task = reference.putFile(imageUri);
 
-  try {
-    // Fetch the role from AsyncStorage before saving the profile
-    const storedRole = await AsyncStorage.getItem('userRole');
-    if (!storedRole) {
-      Alert.alert('Error', 'User role not found.');
+      task.on('state_changed', (snapshot) => {
+        console.log(
+          `Upload is ${(snapshot.bytesTransferred / snapshot.totalBytes) * 100}% done`
+        );
+      });
+
+      await task;
+      const downloadUrl = await reference.getDownloadURL();
+      console.log(`${imageType} image uploaded successfully:`, downloadUrl);
+
+      return downloadUrl;
+    } catch (error) {
+      console.error(`Error uploading ${imageType} image:`, error);
+      throw new Error(`Failed to upload ${imageType} image`);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!userInfo.uid) {
+      Alert.alert('Error', 'User ID not found.');
       return;
     }
 
-    // Save user information in Firestore including the role
-    await firestore()
-      .collection('users')
-      .doc(userInfo.uid)
-      .set({
-        name: name.trim(),
-        email: email.trim(),
-        phoneNumber: phoneNumber.trim(),
-        ownerPhoto: ownerPhoto,
-        role: storedRole, // Add role to Firestore
-      });
-
-    // Save user information in the global state (Redux)
-    dispatch(setUserInfo({ uid: userInfo.uid, name, email, phoneNumber, ownerPhoto, role: storedRole }));
-
-    // Navigate based on user role after saving profile
-    if (storedRole === 'Owner') {
-      const businessDoc = await firestore().collection('businesses').where('userId', '==', userInfo.uid).get();
-      if (!businessDoc.empty) {
-        navigation.navigate('OwnerHomeScreen'); // Navigate to owner home
-      } else {
-        // Pass only serializable data
-        navigation.navigate('BusinessRegistrationScreen', {
-          uid: userInfo.uid,
-          email: email,
-          name: name,
-          phoneNumber: phoneNumber,
-          ownerPhoto: ownerPhoto ? ownerPhoto : '', // Ensure it's a string
-        });
-      }
-    } else if (storedRole === 'User') {
-      navigation.navigate('HomeScreen'); // Navigate to user home
-    } else {
-      Alert.alert('Error', 'Unknown user role. Please contact support.');
+    if (name.trim() === '' || email.trim() === '' || phoneNumber.trim() === '') {
+      Alert.alert('Validation Error', 'Please fill in all fields.');
+      return;
     }
-  } catch (error) {
-    Alert.alert('Error', `Failed to save profile information: ${error.message}`);
-  }
-};
 
+    try {
+      setIsSaving(true); // Start loading indicator for saving
 
-  // Show loading screen while fetching data
+      const storedRole = await AsyncStorage.getItem('userRole');
+      if (!storedRole) {
+        Alert.alert('Error', 'User role not found.');
+        setIsSaving(false); // Stop loading on error
+        return;
+      }
+
+      let ownerPhotoUrl = null;
+      if (ownerPhoto) {
+        ownerPhotoUrl = await uploadImageToStorage(ownerPhoto, userInfo.uid, 'ownerPhoto');
+      }
+
+      // Save user information in Firestore with status and message fields
+      await firestore()
+        .collection('users')
+        .doc(userInfo.uid)
+        .set({
+          name: name.trim(),
+          email: email.trim(),
+          phoneNumber: phoneNumber.trim(),
+          ownerPhoto: ownerPhotoUrl,
+          role: storedRole,
+          status: 'active', // Default status
+          message: 'Account created successfully', // Default empty message
+        });
+
+      // Update Redux state with the new fields
+      dispatch(
+        setUserInfo({
+          uid: userInfo.uid,
+          name,
+          email,
+          phoneNumber,
+          ownerPhoto: ownerPhotoUrl,
+          role: storedRole,
+          status: 'active', // Default status
+          message: '', // Default empty message
+        })
+      );
+
+      // Navigate based on user role
+      if (storedRole === 'Owner') {
+        const businessDoc = await firestore().collection('businesses').where('userId', '==', userInfo.uid).get();
+        if (!businessDoc.empty) {
+          navigation.navigate('OwnerHomeScreen');
+        } else {
+          navigation.navigate('BusinessRegistrationScreen', {
+            uid: userInfo.uid,
+            email: email,
+            name: name,
+            phoneNumber: phoneNumber,
+            ownerPhoto: ownerPhotoUrl ? ownerPhotoUrl : '',
+          });
+        }
+      } else if (storedRole === 'User') {
+        navigation.navigate('HomeScreen');
+      } else {
+        Alert.alert('Error', 'Unknown user role. Please contact support.');
+      }
+    } catch (error) {
+      Alert.alert('Error', `Failed to save profile information: ${error.message}`);
+    } finally {
+      setIsSaving(false); // Stop loading indicator
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -147,9 +190,6 @@ const handleSaveProfile = async () => {
             )}
           </TouchableOpacity>
           <Text style={styles.text}>Your Profile</Text>
-          <View style={{ alignItems: 'center' }}>
-            <Text style={styles.sectionTitle}>Upload Owner Photo</Text>
-          </View>
         </View>
 
         <View style={styles.inputContainer}>
@@ -175,8 +215,16 @@ const handleSaveProfile = async () => {
           />
         </View>
 
-        <TouchableOpacity onPress={handleSaveProfile} style={styles.saveButton}>
-          <Text style={styles.saveButtonText}>Save Profile</Text>
+        <TouchableOpacity
+          onPress={handleSaveProfile}
+          style={styles.saveButton}
+          disabled={isSaving} // Disable button while saving
+        >
+          {isSaving ? (
+            <ActivityIndicator color="#FFFFFF" /> // Show loading indicator
+          ) : (
+            <Text style={styles.saveButtonText}>Save Profile</Text>
+          )}
         </TouchableOpacity>
       </View>
     </View>
@@ -222,11 +270,6 @@ const styles = StyleSheet.create({
     color: 'black',
     fontWeight: 'bold',
   },
-  sectionTitle: {
-    fontSize: 18,
-    color: 'black',
-    marginTop: 10,
-  },
   inputContainer: {
     width: '100%',
   },
@@ -249,8 +292,8 @@ const styles = StyleSheet.create({
   saveButtonText: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: 'black',
+    color: 'white',
   },
 });
 
-export default ProfileScreen; 
+export default ProfileScreen;

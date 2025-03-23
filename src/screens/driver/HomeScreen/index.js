@@ -22,6 +22,7 @@ const DHomeScreen = ({ navigation }) => {
   const [driverData, setDriverData] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [timer, setTimer] = useState(60);
+  const [businessBalance, setBusinessBalance] = useState(0);
 
   useEffect(() => {
     fetchDriverData();
@@ -39,8 +40,10 @@ const DHomeScreen = ({ navigation }) => {
       if (phoneNumber && driverId) {
         const driverDoc = await firestore().collection("drivers").doc(driverId).get();
         if (driverDoc.exists) {
-          setDriverData({ id: driverId, ...driverDoc.data() });
+          const driverData = { id: driverId, ...driverDoc.data() };
+          setDriverData(driverData);
           requestLocationPermission();
+          fetchBusinessBalance(driverData.companyId); // Fetch business balance
         } else {
           console.error("Driver not found in Firestore");
         }
@@ -49,6 +52,20 @@ const DHomeScreen = ({ navigation }) => {
       }
     } catch (error) {
       console.error("Error fetching driver data:", error);
+    }
+  };
+
+  const fetchBusinessBalance = async (companyId) => {
+    try {
+      const businessDoc = await firestore().collection("businesses").doc(companyId).get();
+      if (businessDoc.exists) {
+        const businessData = businessDoc.data();
+        setBusinessBalance(businessData.balance || 0);
+      } else {
+        console.error("Business not found in Firestore");
+      }
+    } catch (error) {
+      console.error("Error fetching business balance:", error);
     }
   };
 
@@ -88,32 +105,85 @@ const DHomeScreen = ({ navigation }) => {
   };
 
   const updateDriverLocationInFirestore = async (latitude, longitude) => {
-    if (!driverData) return;
+    if (!driverData || !driverData.assignedAmbulance) return;
+
     try {
-      await firestore()
-        .collection("duty")
-        .doc(driverData.id)
-        .set(
-          {
-            name: driverData.name,
-            phone: driverData.phoneNumber,
-            ambulanceRegNo: driverData.assignedAmbulance,
-            latitude,
-            longitude,
-            status: isOnline ? "Online" : "Offline",
-            updatedAt: firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
+      const ambulanceDoc = await firestore()
+        .collection("ambulances")
+        .doc(driverData.assignedAmbulance)
+        .get();
+
+      if (ambulanceDoc.exists) {
+        const ambulanceData = ambulanceDoc.data();
+        const ambulanceRegNo = ambulanceData?.registrationNumber || "N/A";
+
+        await firestore()
+          .collection("duty")
+          .doc(driverData.id)
+          .set(
+            {
+              name: driverData.name || "N/A",
+              phone: driverData.phoneNumber || "N/A",
+              ambulanceRegNo: ambulanceRegNo,
+              latitude: latitude || 0,
+              longitude: longitude || 0,
+              status: isOnline ? "Online" : "Offline",
+              updatedAt: firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+        console.log("Driver location and status updated successfully!");
+      } else {
+        console.error("Ambulance not found in Firestore.");
+      }
     } catch (error) {
-      console.error("Error updating location in Firestore:", error);
+      console.error("Error updating driver location in Firestore:", error);
+    }
+  };
+
+  const updateDriverStatusInFirestore = async (status) => {
+    if (!driverData || !currentLocation) return;
+
+    try {
+      const ambulanceDoc = await firestore()
+        .collection("ambulances")
+        .doc(driverData.assignedAmbulance)
+        .get();
+
+      if (ambulanceDoc.exists) {
+        const ambulanceData = ambulanceDoc.data();
+        const ambulanceRegNo = ambulanceData?.registrationNumber || "N/A";
+
+        await firestore()
+          .collection("duty")
+          .doc(driverData.id)
+          .set(
+            {
+              name: driverData.name || "N/A",
+              phone: driverData.phoneNumber || "N/A",
+              ambulanceRegNo: ambulanceRegNo,
+              latitude: currentLocation.latitude || 0,
+              longitude: currentLocation.longitude || 0,
+              status: status ? "Online" : "Offline",
+              updatedAt: firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+        console.log("Driver status updated successfully!");
+      } else {
+        console.error("Ambulance not found in Firestore.");
+      }
+    } catch (error) {
+      console.error("Error updating driver status in Firestore:", error);
     }
   };
 
   useEffect(() => {
     const unsubscribe = firestore()
       .collection("orders")
-      .where("status", "==", "pending")
+      .where("status", "==", "Pending")
       .onSnapshot(
         (snapshot) => {
           const fetchedOrders = snapshot.docs.map((doc) => ({
@@ -122,7 +192,6 @@ const DHomeScreen = ({ navigation }) => {
           }));
           setOrders(fetchedOrders);
           setLoading(false);
-          // Automatically select the first order if none is selected
           if (fetchedOrders.length > 0 && !selectedOrder) {
             setSelectedOrder(fetchedOrders[0]);
             setTimer(60);
@@ -153,40 +222,6 @@ const DHomeScreen = ({ navigation }) => {
     return () => clearInterval(interval);
   }, [selectedOrder]);
 
-  const updateDriverStatusInFirestore = async (status) => {
-    if (!driverData || !currentLocation) return;
-    try {
-      const ambulanceDoc = await firestore()
-        .collection("ambulances")
-        .doc(driverData.assignedAmbulance)
-        .get();
-      if (ambulanceDoc.exists) {
-        const ambulanceData = ambulanceDoc.data();
-        const ambulanceRegNo = ambulanceData?.registrationNumber;
-        await firestore()
-          .collection("duty")
-          .doc(driverData.id)
-          .set(
-            {
-              name: driverData.name,
-              phone: driverData.phoneNumber,
-              ambulanceRegNo: ambulanceRegNo,
-              latitude: currentLocation.latitude,
-              longitude: currentLocation.longitude,
-              status: status ? "Online" : "Offline",
-              updatedAt: firestore.FieldValue.serverTimestamp(),
-            },
-            { merge: true }
-          );
-        console.log("Driver status and location updated successfully!");
-      } else {
-        console.error("Ambulance not found in Firestore.");
-      }
-    } catch (error) {
-      console.error("Error updating driver status and location in Firestore:", error);
-    }
-  };
-
   const toggleOnlineStatus = () => {
     setIsOnline((prev) => {
       const newStatus = !prev;
@@ -197,31 +232,27 @@ const DHomeScreen = ({ navigation }) => {
 
   const acceptOrder = async (order) => {
     try {
-      // Update the order document to reflect acceptance and add driver details
       await firestore().collection("orders").doc(order.id).update({
-        status: "Accepted",
+        status: "In Progress",
         driverName: driverData.name,
         driverPhone: driverData.phoneNumber,
         ambulanceRegNo: driverData.assignedAmbulance,
         driverLocation: currentLocation,
         assignedDriverId: driverData.id,
       });
-      // Remove the order from local state
-      setOrders((prev) => prev.filter((item) => item.id !== order.id));
-      // Navigate to DriverTrack screen (which now reads from "orders" collection)
       navigation.navigate("DriverTrack", {
         orderId: order.id,
         orderDetails: {
           id: order.id,
-          userName: order.userName,
-          userPhone: order.userPhone,
-          originName: order.originName,
-          destinationName: order.destinationName,
-          pickupTime: order.pickupTime,
-          type: order.type,
-          price: order.price,
-          distance: order.distance,
-          userPhoto: order.userPhoto,
+          userName: order.user?.name || "N/A",
+          userPhone: order.user?.phone || "N/A",
+          originName: order.route?.origin?.name || "N/A",
+          destinationName: order.route?.destination?.name || "N/A",
+          pickupTime: order.pickupTime || "N/A",
+          type: order.type || "N/A",
+          price: order.vehicle?.price || "N/A",
+          distance: order.route?.destination?.distance || "N/A",
+          userPhoto: order.user?.photo || null,
         },
         driverDetails: {
           name: driverData.name,
@@ -230,7 +261,6 @@ const DHomeScreen = ({ navigation }) => {
           location: currentLocation,
         },
       });
-      // Reset timer and selection
       setSelectedOrder(null);
       setTimer(60);
     } catch (error) {
@@ -270,29 +300,41 @@ const DHomeScreen = ({ navigation }) => {
             ) : (
               orders.map((order) => (
                 <View key={order.id} style={styles.orderCard}>
+                <View style={styles.userInfoContainer}>
+                  {order.user?.photo ? (
+                    <Image
+                      source={{ uri: order.user.photo }}
+                      style={styles.userImage}
+                    />
+                  ) : (
+                    <View style={[styles.userImage, styles.placeholderImage]}>
+                      <Text style={styles.placeholderText}>No Image</Text>
+                    </View>
+                  )}
                   <Text style={styles.orderTitle}>
                     Name: {order.user?.name || "N/A"}
                   </Text>
-                  <Text style={styles.orderDetails}>
-                    Pickup: {order.route?.origin?.name || "N/A"}
-                  </Text>
-                  <Text style={styles.orderDetails}>
-                    Drop-off: {order.route?.destination?.name || "N/A"}
-                  </Text>
-                  <Text style={styles.countPrice}>
-                    Rs : {order.vehicle?.price || "N/A"}
-                  </Text>
-                  <Text style={styles.countPrice}>
-                    Distance : {order.route?.destination?.distance || "N/A"} km
-                  </Text>
-                  <Text style={styles.countdownText}>{timer}s</Text>
-                  <Pressable
-                    style={styles.orderCardButton}
-                    onPress={() => acceptOrder(order)}
-                  >
-                    <Text style={styles.orderCardButtonText}>Accept Order</Text>
-                  </Pressable>
                 </View>
+                <Text style={styles.orderDetails}>
+                  Pickup: {order.route?.origin?.name || "N/A"}
+                </Text>
+                <Text style={styles.orderDetails}>
+                  Drop-off: {order.route?.destination?.name || "N/A"}
+                </Text>
+                <Text style={styles.countPrice}>
+                  Rs: {order.vehicle?.price?.toFixed(2) || "N/A"} {/* Format price to 2 decimal places */}
+                </Text>
+                <Text style={styles.orderDetails}>
+                  Distance: {order.route?.distance?.toFixed(2) || "N/A"} km {/* Format distance to 2 decimal places */}
+                </Text>
+                <Text style={styles.countdownText}>{timer}s</Text>
+                <Pressable
+                  style={styles.orderCardButton}
+                  onPress={() => acceptOrder(order)}
+                >
+                  <Text style={styles.orderCardButtonText}>Accept Order</Text>
+                </Pressable>
+              </View>
               ))
             )}
           </ScrollView>
@@ -310,6 +352,7 @@ const DHomeScreen = ({ navigation }) => {
       )}
       <ToggleOnlineStatus isOnline={isOnline} toggleOnlineStatus={toggleOnlineStatus} />
       <Logout navigation={navigation} />
+      <Text style={styles.balanceText}>Business Balance: Rs {businessBalance}</Text>
     </View>
   );
 };
@@ -324,6 +367,16 @@ const ToggleOnlineStatus = ({ isOnline, toggleOnlineStatus }) => (
 );
 
 const styles = StyleSheet.create({
+  placeholderImage: {
+    backgroundColor: "#E0E0E0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  placeholderText: {
+    color: "#666",
+    fontSize: 12,
+    fontFamily: "Inter-Regular",
+  },
   container: { flex: 1, backgroundColor: "#F5F5F5" },
   onlineContainer: { flex: 1 },
   offlineContainer: {
@@ -357,27 +410,46 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 12,
     shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
     borderWidth: 1,
     borderColor: "#EEE",
   },
+  userInfoContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  userImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+    backgroundColor: "#E0E0E0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  placeholderText: {
+    color: "#666",
+    fontSize: 12,
+    fontFamily: "Inter-Regular",
+  },
   orderTitle: {
     fontFamily: "Inter-Bold",
     fontSize: 18,
     color: "#1A1A1A",
-    marginBottom: 8,
+    marginBottom: 4,
   },
   orderDetails: {
     fontSize: 14,
     color: "#666",
     fontFamily: "Inter-Regular",
-    marginVertical: 2,
+    marginVertical: 4,
   },
   countPrice: {
-    fontSize: 15,
+    fontSize: 16,
     color: "#2E7D32",
     fontFamily: "Inter-SemiBold",
     marginTop: 8,
@@ -450,6 +522,13 @@ const styles = StyleSheet.create({
     fontFamily: "Inter-Medium",
     textAlign: "center",
     paddingHorizontal: 40,
+  },
+  balanceText: {
+    textAlign: "center",
+    fontSize: 16,
+    color: "#2E7D32",
+    fontFamily: "Inter-SemiBold",
+    marginBottom: 16,
   },
 });
 

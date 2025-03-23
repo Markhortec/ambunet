@@ -12,7 +12,7 @@ export const fetchUserData = createAsyncThunk(
       if (storedUserProfile) {
         return JSON.parse(storedUserProfile);
       }
-      return null; 
+      return null;
     } catch (error) {
       throw new Error('Failed to load user data');
     }
@@ -39,31 +39,37 @@ const userSlice = createSlice({
     uid: null,
     phoneNumber: null,
     name: null,
-    email: null,  
-    role: null,   
+    email: null,
+    role: null,
     confirmResult: null,
-    status: 'idle',
+    status: 'idle', // Loading state for async operations
     error: null,
+    userStatus: 'active', // New field: User account status (default: 'active')
+    message: '', // New field: Additional message (default: empty string)
   },
   reducers: {
     setConfirmResult: (state, action) => {
       state.confirmResult = action.payload.verificationId;
     },
     setUserInfo: (state, action) => {
-      const { uid, phoneNumber, name, email, role } = action.payload;  // Destructure email as well
+      const { uid, phoneNumber, name, email, role, userStatus, message } = action.payload; // Destructure new fields
       state.uid = uid || state.uid;
       state.phoneNumber = phoneNumber || state.phoneNumber;
       state.name = name || state.name;
-      state.email = email || state.email;  // Set email in state
-      state.role = role || state.role;  // Set role in state
+      state.email = email || state.email;
+      state.role = role || state.role;
+      state.userStatus = userStatus || 'active'; // Default to 'active' if not provided
+      state.message = message || ''; // Default to empty string if not provided
     },
     clearUserInfo: (state) => {
       state.uid = null;
       state.phoneNumber = null;
       state.name = null;
-      state.email = null; 
-      state.role = null;  
+      state.email = null;
+      state.role = null;
       state.confirmResult = null;
+      state.userStatus = 'active'; // Reset to default
+      state.message = ''; // Reset to default
     },
   },
   extraReducers: (builder) => {
@@ -73,12 +79,14 @@ const userSlice = createSlice({
       })
       .addCase(fetchUserData.fulfilled, (state, action) => {
         state.status = 'succeeded';
-        const { name, uid, phoneNumber, email, role } = action.payload || {};  // Destructure email and role
+        const { name, uid, phoneNumber, email, role, userStatus, message } = action.payload || {}; // Destructure new fields
         state.name = name || null;
         state.uid = uid || null;
         state.phoneNumber = phoneNumber || null;
-        state.email = email || null;  
-        state.role = role || null;  
+        state.email = email || null;
+        state.role = role || null;
+        state.userStatus = userStatus || 'active'; // Default to 'active' if not provided
+        state.message = message || ''; // Default to empty string if not provided
       })
       .addCase(fetchUserData.rejected, (state, action) => {
         state.status = 'failed';
@@ -88,9 +96,11 @@ const userSlice = createSlice({
         state.uid = null;
         state.phoneNumber = null;
         state.name = null;
-        state.email = null; 
-        state.role = null;   
+        state.email = null;
+        state.role = null;
         state.confirmResult = null;
+        state.userStatus = 'active'; // Reset to default
+        state.message = ''; // Reset to default
         state.status = 'idle';
       })
       .addCase(signOutUser.rejected, (state, action) => {
