@@ -11,7 +11,7 @@ import { useSelector, useDispatch } from "react-redux";
 import { getFirestore, doc, getDoc } from "@react-native-firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { setOrderData } from "../../../redux/orderSlice";
-
+import { resetOrderData } from "../../../redux/orderSlice";
 const HomeScreen = ({ navigation }) => {
   const orderId = useSelector((state) => state.order.orderId);
   const [loading, setLoading] = useState(false);
@@ -91,6 +91,11 @@ const HomeScreen = ({ navigation }) => {
             // Navigate to UserTrack if the order is accepted.
             navigation.navigate("UserTrack", { orderId: orderId });
 
+          }
+          else{
+            await AsyncStorage.clear();
+             dispatch(resetOrderData());
+            console.log("Order is already completed");
           }
         } else {
           console.log("No order found with the given Order ID:", orderId);

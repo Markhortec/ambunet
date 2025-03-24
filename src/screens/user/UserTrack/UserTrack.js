@@ -6,14 +6,31 @@ import {
   ActivityIndicator,
   ScrollView,
   Dimensions,
+  Alert,
 } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import MapViewDirections from "react-native-maps-directions";
 import firestore from "@react-native-firebase/firestore";
 
-const GOOGLE_MAPS_APIKEY = "AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM"; // Replace with your actual API key
+const GOOGLE_MAPS_APIKEY = "AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM";
 
-const UserTrack = ({ route }) => {
+// Same distance calculation function as in DriverTrack
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371e3; // Earth radius in meters
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+};
+
+const UserTrack = ({ route, navigation }) => {
   const { orderId } = route.params;
   const [currentLocation, setCurrentLocation] = useState(null);
   const [origin, setOrigin] = useState(null);
@@ -22,6 +39,7 @@ const UserTrack = ({ route }) => {
   const [orderData, setOrderData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [distanceToOrigin, setDistanceToOrigin] = useState(null);
   const mapRef = useRef(null);
 
   useEffect(() => {
@@ -32,43 +50,31 @@ const UserTrack = ({ route }) => {
         (doc) => {
           if (doc.exists) {
             const data = doc.data();
-            console.log("Order Data:", JSON.stringify(data, null, 2));
 
-            // Update driver's current location
             if (data.driverLocation?.latitude && data.driverLocation?.longitude) {
               setCurrentLocation(data.driverLocation);
-            } else {
-              console.warn("driverLocation is missing or incomplete.");
             }
 
-            // Extract origin from the route field
             if (data.route?.origin?.latitude && data.route?.origin?.longitude) {
               setOrigin({
                 latitude: data.route.origin.latitude,
                 longitude: data.route.origin.longitude,
                 name: data.route.origin.name || "Pickup Location",
               });
-            } else {
-              console.warn("Origin data is missing.");
             }
 
-            // Extract destination from the route field
             if (data.route?.destination?.latitude && data.route?.destination?.longitude) {
               setDestination({
                 latitude: data.route.destination.latitude,
                 longitude: data.route.destination.longitude,
                 name: data.route.destination.name || "Destination",
               });
-            } else {
-              console.warn("Destination data is missing.");
             }
 
-            // Update status and order data
             setRideStatus(data.status || "Accepted");
             setOrderData(data);
             setLoading(false);
 
-            // Animate map to driver's location when updated
             if (data.driverLocation && mapRef.current) {
               mapRef.current.animateToRegion({
                 latitude: data.driverLocation.latitude,
@@ -76,6 +82,15 @@ const UserTrack = ({ route }) => {
                 latitudeDelta: 0.05,
                 longitudeDelta: 0.05,
               });
+            }
+
+            if (data.status === "Arrived" && rideStatus !== "Arrived") {
+              Alert.alert("Ambulance Arrived", "Your ambulance has arrived at the pickup location");
+            }
+
+            if (data.status === "Completed" && rideStatus !== "Completed") {
+              Alert.alert("Ride Completed", "Your ride has been completed");
+              navigation.goBack();
             }
           } else {
             setError("No order found.");
@@ -89,7 +104,20 @@ const UserTrack = ({ route }) => {
       );
 
     return () => unsubscribe();
-  }, [orderId]);
+  }, [orderId, rideStatus]);
+
+  // Calculate distance to origin
+  useEffect(() => {
+    if (!currentLocation || !origin) return;
+
+    const distance = calculateDistance(
+      currentLocation.latitude,
+      currentLocation.longitude,
+      origin.latitude,
+      origin.longitude
+    );
+    setDistanceToOrigin(distance);
+  }, [currentLocation, origin]);
 
   if (loading) {
     return (
