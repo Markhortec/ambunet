@@ -1,3 +1,5 @@
+
+
 import React, { useCallback, useEffect, useState } from "react";
 import { View, Dimensions, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import Ionicons from "react-native-vector-icons/Ionicons";
@@ -18,10 +20,10 @@ const HomeScreen = ({ navigation }) => {
   useEffect(() => {
     const fetchOrderIdFromStorage = async () => {
       // await AsyncStorage.clear();
-      // const storedOrderId = await AsyncStorage.getItem('orderId');
-      // if (storedOrderId) {
-      //   dispatch(setOrderData(storedOrderId));
-      // }
+      const storedOrderId = await AsyncStorage.getItem('orderId');
+      if (storedOrderId) {
+        dispatch(setOrderData(storedOrderId));
+      }
     };
 
     fetchOrderIdFromStorage();
@@ -84,6 +86,11 @@ const HomeScreen = ({ navigation }) => {
               distance: orderData.route.distance,
               price: orderData.vehicle.price,
             });
+          }
+          else if(orderData.status === "In Progress") {
+            // Navigate to UserTrack if the order is accepted.
+            navigation.navigate("UserTrack", { orderId: orderId });
+
           }
         } else {
           console.log("No order found with the given Order ID:", orderId);
