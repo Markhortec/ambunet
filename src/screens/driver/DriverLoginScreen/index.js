@@ -5,7 +5,7 @@ import firestore from '@react-native-firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 import { useDispatch } from "react-redux";
 import { setDriverInfo } from "../../../redux/driverSlice";
-
+import { resetOrderData } from "../../../redux/driverOrderSlice";
 const DriverLoginScreen = ({ navigation }) => {
     const [phoneNumber, setPhoneNumber] = useState('');
     const [password, setPassword] = useState('');
@@ -14,24 +14,65 @@ const DriverLoginScreen = ({ navigation }) => {
     useEffect(() => {
         const driverCheck = async () => {
             try {
-                
                 const storedDriver = await AsyncStorage.getItem('driverData');
                 
                 if (storedDriver) {
                     const driverData = JSON.parse(storedDriver);
                     const { driverId } = driverData;
     
-                   
                     if (driverId) {
-                        
                         const driverDoc = await firestore().collection('drivers').doc(driverId).get();
     
                         if (driverDoc.exists) {
-                            
                             dispatch(setDriverInfo(driverData));
     
-                            
+                            // First check if navigation is available
                             if (navigation && navigation.replace) {
+                                // Check for existing order in AsyncStorage
+                                const storedOrderId = await AsyncStorage.getItem('driverOrderId');
+                                
+                                if (storedOrderId) {
+                                    // Verify order status in Firestore
+                                    const orderDoc = await firestore()
+                                        .collection('orders')
+                                        .doc(storedOrderId)
+                                        .get();
+                                    
+                                    if (orderDoc.exists) {
+                                        const orderData = orderDoc.data();
+                                        // Check if order is still active
+                                        if (orderData.status === 'In Progress' || orderData.status === 'Accepted' || orderData.status === 'Arrived') {
+                                            console.log('Navigating to DriverTrack with existing order');
+                                            navigation.replace('DriverTrack', {
+                                                orderId: storedOrderId,
+                                                orderDetails: {
+                                                    id: storedOrderId,
+                                                    userName: orderData.user?.name || "N/A",
+                                                    userPhone: orderData.user?.phone || "N/A",
+                                                    originName: orderData.route?.origin?.name || "N/A",
+                                                    destinationName: orderData.route?.destination?.name || "N/A",
+                                                    pickupTime: orderData.pickupTime || "N/A",
+                                                    type: orderData.type || "N/A",
+                                                    price: orderData.vehicle?.price || "N/A",
+                                                    distance: orderData.route?.distance || "N/A",
+                                                    userPhoto: orderData.user?.photo || null,
+                                                },
+                                                driverDetails: {
+                                                    name: driverData.name,
+                                                    phone: driverData.phoneNumber,
+                                                    ambulanceRegNo: driverData.assignedAmbulance,
+                                                    location: null, // Will be updated when online
+                                                },
+                                            });
+                                            return;
+                                        }
+                                    }
+                                }
+                                
+                                // If no active order found, go to home screen
+                                //  await AsyncStorage.clear();
+                                //  dispatch(resetOrderData());
+                                console.log("Order is already completed");
                                 console.log('Navigating to DHomeScreen');
                                 navigation.replace('DHomeScreen');
                             } else {
@@ -41,13 +82,13 @@ const DriverLoginScreen = ({ navigation }) => {
                     } 
                 } 
             } catch (error) {
-                // console.error('Error during driver check:', error);
-                // Alert.alert('Error', 'An error occurred while verifying driver information.');
+                console.error('Error during driver check:', error);
+                Alert.alert('Error', 'An error occurred while verifying driver information.');
             }
         };
     
         driverCheck();
-    }, [dispatch]);
+    }, [dispatch, navigation]);
     const handleLogin = async () => {
         setLoading(true);
         try {

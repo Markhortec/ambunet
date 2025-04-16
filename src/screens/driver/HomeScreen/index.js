@@ -7,13 +7,15 @@ import {
   PermissionsAndroid,
   Image,
   ScrollView,
+  Alert
 } from "react-native";
 import Geolocation from "react-native-geolocation-service";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import firestore from "@react-native-firebase/firestore";
 import Logout from "../../../components/owner/Logout";
-
+import { useDispatch } from "react-redux";
+import { setOrderData } from '../../../redux/driverOrderSlice';
 const DHomeScreen = ({ navigation }) => {
   const [orders, setOrders] = useState([]);
   const [isOnline, setIsOnline] = useState(false);
@@ -23,10 +25,20 @@ const DHomeScreen = ({ navigation }) => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [timer, setTimer] = useState(60);
   const [businessBalance, setBusinessBalance] = useState(0);
-
+  const dispatch = useDispatch();
   useEffect(() => {
     fetchDriverData();
   }, []);
+
+  // Interval-based location updates
+  useEffect(() => {
+    let locationInterval;
+    if (isOnline) {
+      fetchCurrentLocation(); // Initial fetch
+      locationInterval = setInterval(fetchCurrentLocation, 2000); // Update every 2 seconds
+    }
+    return () => clearInterval(locationInterval);
+  }, [isOnline]);
 
   const fetchDriverData = async () => {
     try {
@@ -43,7 +55,7 @@ const DHomeScreen = ({ navigation }) => {
           const driverData = { id: driverId, ...driverDoc.data() };
           setDriverData(driverData);
           requestLocationPermission();
-          fetchBusinessBalance(driverData.companyId); // Fetch business balance
+          fetchBusinessBalance(driverData.companyId);
         } else {
           console.error("Driver not found in Firestore");
         }
@@ -232,14 +244,27 @@ const DHomeScreen = ({ navigation }) => {
 
   const acceptOrder = async (order) => {
     try {
-      await firestore().collection("orders").doc(order.id).update({
-        status: "In Progress",
-        driverName: driverData.name,
-        driverPhone: driverData.phoneNumber,
-        ambulanceRegNo: driverData.assignedAmbulance,
-        driverLocation: currentLocation,
-        assignedDriverId: driverData.id,
+      await firestore().runTransaction(async (transaction) => {
+        const orderRef = firestore().collection("orders").doc(order.id);
+        const orderDoc = await transaction.get(orderRef);
+        
+        if (orderDoc.exists && orderDoc.data().status === "Pending") {
+          transaction.update(orderRef, {
+            status: "In Progress",
+            driverName: driverData.name,
+            driverPhone: driverData.phoneNumber,
+            ambulanceRegNo: driverData.assignedAmbulance,
+            driverLocation: currentLocation,
+            assignedDriverId: driverData.id,
+          });
+            //  Store orderId in Redux & AsyncStorage
+        dispatch(setOrderData(order.id));
+        await AsyncStorage.setItem('driverOrderId', order.id);
+        } else {
+          throw new Error("Order has already been accepted.");
+        }
       });
+
       navigation.navigate("DriverTrack", {
         orderId: order.id,
         orderDetails: {
@@ -251,7 +276,7 @@ const DHomeScreen = ({ navigation }) => {
           pickupTime: order.pickupTime || "N/A",
           type: order.type || "N/A",
           price: order.vehicle?.price || "N/A",
-          distance: order.route?.destination?.distance || "N/A",
+          distance: order.route?.distance || "N/A",
           userPhoto: order.user?.photo || null,
         },
         driverDetails: {
@@ -265,6 +290,7 @@ const DHomeScreen = ({ navigation }) => {
       setTimer(60);
     } catch (error) {
       console.error("Error accepting order:", error);
+      Alert.alert("Error", error.message || "Failed to accept order");
     }
   };
 
@@ -300,41 +326,41 @@ const DHomeScreen = ({ navigation }) => {
             ) : (
               orders.map((order) => (
                 <View key={order.id} style={styles.orderCard}>
-                <View style={styles.userInfoContainer}>
-                  {order.user?.photo ? (
-                    <Image
-                      source={{ uri: order.user.photo }}
-                      style={styles.userImage}
-                    />
-                  ) : (
-                    <View style={[styles.userImage, styles.placeholderImage]}>
-                      <Text style={styles.placeholderText}>No Image</Text>
-                    </View>
-                  )}
-                  <Text style={styles.orderTitle}>
-                    Name: {order.user?.name || "N/A"}
+                  <View style={styles.userInfoContainer}>
+                    {order.user?.photo ? (
+                      <Image
+                        source={{ uri: order.user.photo }}
+                        style={styles.userImage}
+                      />
+                    ) : (
+                      <View style={[styles.userImage, styles.placeholderImage]}>
+                        <Text style={styles.placeholderText}>No Image</Text>
+                      </View>
+                    )}
+                    <Text style={styles.orderTitle}>
+                      Name: {order.user?.name || "N/A"}
+                    </Text>
+                  </View>
+                  <Text style={styles.orderDetails}>
+                    Pickup: {order.route?.origin?.name || "N/A"}
                   </Text>
+                  <Text style={styles.orderDetails}>
+                    Drop-off: {order.route?.destination?.name || "N/A"}
+                  </Text>
+                  <Text style={styles.countPrice}>
+                    Rs: {order.vehicle?.price?.toFixed(2) || "N/A"}
+                  </Text>
+                  <Text style={styles.orderDetails}>
+                    Distance: {order.route?.distance?.toFixed(2) || "N/A"} km
+                  </Text>
+                  <Text style={styles.countdownText}>{timer}s</Text>
+                  <Pressable
+                    style={styles.orderCardButton}
+                    onPress={() => acceptOrder(order)}
+                  >
+                    <Text style={styles.orderCardButtonText}>Accept Order</Text>
+                  </Pressable>
                 </View>
-                <Text style={styles.orderDetails}>
-                  Pickup: {order.route?.origin?.name || "N/A"}
-                </Text>
-                <Text style={styles.orderDetails}>
-                  Drop-off: {order.route?.destination?.name || "N/A"}
-                </Text>
-                <Text style={styles.countPrice}>
-                  Rs: {order.vehicle?.price?.toFixed(2) || "N/A"} {/* Format price to 2 decimal places */}
-                </Text>
-                <Text style={styles.orderDetails}>
-                  Distance: {order.route?.distance?.toFixed(2) || "N/A"} km {/* Format distance to 2 decimal places */}
-                </Text>
-                <Text style={styles.countdownText}>{timer}s</Text>
-                <Pressable
-                  style={styles.orderCardButton}
-                  onPress={() => acceptOrder(order)}
-                >
-                  <Text style={styles.orderCardButtonText}>Accept Order</Text>
-                </Pressable>
-              </View>
               ))
             )}
           </ScrollView>
@@ -430,11 +456,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#E0E0E0",
     justifyContent: "center",
     alignItems: "center",
-  },
-  placeholderText: {
-    color: "#666",
-    fontSize: 12,
-    fontFamily: "Inter-Regular",
   },
   orderTitle: {
     fontFamily: "Inter-Bold",

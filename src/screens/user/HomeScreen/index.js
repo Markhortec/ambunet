@@ -73,8 +73,8 @@ const HomeScreen = ({ navigation }) => {
             };
   
             // Log the structured data for debugging
-            console.log("Structured Origin Place:", originPlace);
-            console.log("Structured Destination Place:", destinationPlace);
+            // console.log("Structured Origin Place:", originPlace);
+            // console.log("Structured Destination Place:", destinationPlace);
   
             // Navigate to OrderScreen with the structured data
             navigation.navigate("OrderScreen", {
