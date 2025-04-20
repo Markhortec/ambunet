@@ -16,6 +16,7 @@ import firestore from "@react-native-firebase/firestore";
 import Logout from "../../../components/owner/Logout";
 import { useDispatch } from "react-redux";
 import { setOrderData } from '../../../redux/driverOrderSlice';
+
 const DHomeScreen = ({ navigation }) => {
   const [orders, setOrders] = useState([]);
   const [isOnline, setIsOnline] = useState(false);
@@ -25,17 +26,47 @@ const DHomeScreen = ({ navigation }) => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [timer, setTimer] = useState(60);
   const [businessBalance, setBusinessBalance] = useState(0);
+  const [priceRules, setPriceRules] = useState([]);
   const dispatch = useDispatch();
+
   useEffect(() => {
     fetchDriverData();
+    fetchPriceRules();
   }, []);
+
+  // Fetch price rules from Firestore
+  const fetchPriceRules = async () => {
+    try {
+      const querySnapshot = await firestore().collection('priceRules').get();
+      const rules = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      rules.sort((a, b) => a.distance - b.distance);
+      setPriceRules(rules);
+    } catch (error) {
+      console.error("Error fetching price rules:", error);
+    }
+  };
+
+  // Calculate price percentage based on distance
+  const calculatePriceBasedOnDistance = (distance) => {
+    if (!priceRules.length) return 18;
+    const applicableRule = priceRules.find(rule => distance <= rule.distance);
+    return applicableRule ? applicableRule.percentage : 18;
+  };
+
+  // Check if business has sufficient balance
+  const checkBusinessBalance = (orderPrice) => {
+    return businessBalance >= orderPrice;
+  };
 
   // Interval-based location updates
   useEffect(() => {
     let locationInterval;
     if (isOnline) {
-      fetchCurrentLocation(); // Initial fetch
-      locationInterval = setInterval(fetchCurrentLocation, 2000); // Update every 2 seconds
+      fetchCurrentLocation();
+      locationInterval = setInterval(fetchCurrentLocation, 2000);
     }
     return () => clearInterval(locationInterval);
   }, [isOnline]);
@@ -144,8 +175,6 @@ const DHomeScreen = ({ navigation }) => {
             },
             { merge: true }
           );
-
-        console.log("Driver location and status updated successfully!");
       } else {
         console.error("Ambulance not found in Firestore.");
       }
@@ -182,8 +211,6 @@ const DHomeScreen = ({ navigation }) => {
             },
             { merge: true }
           );
-
-        console.log("Driver status updated successfully!");
       } else {
         console.error("Ambulance not found in Firestore.");
       }
@@ -244,6 +271,15 @@ const DHomeScreen = ({ navigation }) => {
 
   const acceptOrder = async (order) => {
     try {
+      const orderDistance = order.route?.distance || 0;
+      const pricePercentage = calculatePriceBasedOnDistance(orderDistance);
+      const basePrice = order.vehicle?.price || 0;
+      const actualPrice = (basePrice * pricePercentage) / 100;
+
+      if (!checkBusinessBalance(actualPrice)) {
+        throw new Error("Business doesn't have sufficient balance to cover this order");
+      }
+
       await firestore().runTransaction(async (transaction) => {
         const orderRef = firestore().collection("orders").doc(order.id);
         const orderDoc = await transaction.get(orderRef);
@@ -256,10 +292,13 @@ const DHomeScreen = ({ navigation }) => {
             ambulanceRegNo: driverData.assignedAmbulance,
             driverLocation: currentLocation,
             assignedDriverId: driverData.id,
+            calculatedPrice: actualPrice,
+            pricePercentage: pricePercentage,
+            pricingRuleApplied: pricePercentage === 18 ? "Fixed 18% (Exceeds max distance)" : "Distance-based"
           });
-            //  Store orderId in Redux & AsyncStorage
-        dispatch(setOrderData(order.id));
-        await AsyncStorage.setItem('driverOrderId', order.id);
+
+          dispatch(setOrderData(order.id));
+          await AsyncStorage.setItem('driverOrderId', order.id);
         } else {
           throw new Error("Order has already been accepted.");
         }
@@ -275,9 +314,12 @@ const DHomeScreen = ({ navigation }) => {
           destinationName: order.route?.destination?.name || "N/A",
           pickupTime: order.pickupTime || "N/A",
           type: order.type || "N/A",
-          price: order.vehicle?.price || "N/A",
+          price: actualPrice,
+          basePrice: basePrice,
           distance: order.route?.distance || "N/A",
           userPhoto: order.user?.photo || null,
+          pricePercentage: pricePercentage,
+          pricingRule: pricePercentage === 18 ? "Fixed 18% (Exceeds max distance)" : "Distance-based"
         },
         driverDetails: {
           name: driverData.name,
@@ -324,44 +366,79 @@ const DHomeScreen = ({ navigation }) => {
             {orders.length === 0 ? (
               <Text style={styles.noOrdersText}>No pending orders</Text>
             ) : (
-              orders.map((order) => (
-                <View key={order.id} style={styles.orderCard}>
-                  <View style={styles.userInfoContainer}>
-                    {order.user?.photo ? (
-                      <Image
-                        source={{ uri: order.user.photo }}
-                        style={styles.userImage}
-                      />
-                    ) : (
-                      <View style={[styles.userImage, styles.placeholderImage]}>
-                        <Text style={styles.placeholderText}>No Image</Text>
-                      </View>
-                    )}
-                    <Text style={styles.orderTitle}>
-                      Name: {order.user?.name || "N/A"}
+              orders.map((order) => {
+                const orderDistance = order.route?.distance || 0;
+                const pricePercentage = calculatePriceBasedOnDistance(orderDistance);
+                const basePrice = order.vehicle?.price || 0;
+                const actualPrice = (basePrice * pricePercentage) / 100;
+                const hasSufficientBalance = checkBusinessBalance(actualPrice);
+                const isFixedPercentage = pricePercentage === 18 && 
+                  (priceRules.length > 0 && orderDistance > priceRules[priceRules.length - 1].distance);
+
+                return (
+                  <View key={order.id} style={[
+                    styles.orderCard,
+                    !hasSufficientBalance && styles.insufficientBalanceCard,
+                    isFixedPercentage && styles.fixedPercentageCard
+                  ]}>
+                    <View style={styles.userInfoContainer}>
+                      {order.user?.photo ? (
+                        <Image
+                          source={{ uri: order.user.photo }}
+                          style={styles.userImage}
+                        />
+                      ) : (
+                        <View style={[styles.userImage, styles.placeholderImage]}>
+                          <Text style={styles.placeholderText}>No Image</Text>
+                        </View>
+                      )}
+                      <Text style={styles.orderTitle}>
+                        Name: {order.user?.name || "N/A"}
+                      </Text>
+                    </View>
+                    <Text style={styles.orderDetails}>
+                      Pickup: {order.route?.origin?.name || "N/A"}
                     </Text>
+                    <Text style={styles.orderDetails}>
+                      Drop-off: {order.route?.destination?.name || "N/A"}
+                    </Text>
+                    <Text style={styles.orderDetails}>
+                      Distance: {orderDistance.toFixed(2)} km
+                    </Text>
+                    <Text style={styles.orderDetails}>
+                      Base Price: Rs {basePrice.toFixed(2)}
+                    </Text>
+                    <Text style={[
+                      styles.orderDetails,
+                      isFixedPercentage && styles.fixedPercentageText
+                    ]}>
+                      Applied Percentage: {pricePercentage}% 
+                      {isFixedPercentage ? " (Fixed for long distance)" : ""}
+                    </Text>
+                    <Text style={styles.countPrice}>
+                      Final Price: Rs {actualPrice.toFixed(2)}
+                    </Text>
+                    {!hasSufficientBalance && (
+                      <Text style={styles.warningText}>
+                        Warning: Business balance insufficient for this order
+                      </Text>
+                    )}
+                    <Text style={styles.countdownText}>{timer}s</Text>
+                    <Pressable
+                      style={[
+                        styles.orderCardButton,
+                        !hasSufficientBalance && styles.disabledButton
+                      ]}
+                      onPress={() => acceptOrder(order)}
+                      disabled={!hasSufficientBalance}
+                    >
+                      <Text style={styles.orderCardButtonText}>
+                        {hasSufficientBalance ? "Accept Order" : "Insufficient Balance"}
+                      </Text>
+                    </Pressable>
                   </View>
-                  <Text style={styles.orderDetails}>
-                    Pickup: {order.route?.origin?.name || "N/A"}
-                  </Text>
-                  <Text style={styles.orderDetails}>
-                    Drop-off: {order.route?.destination?.name || "N/A"}
-                  </Text>
-                  <Text style={styles.countPrice}>
-                    Rs: {order.vehicle?.price?.toFixed(2) || "N/A"}
-                  </Text>
-                  <Text style={styles.orderDetails}>
-                    Distance: {order.route?.distance?.toFixed(2) || "N/A"} km
-                  </Text>
-                  <Text style={styles.countdownText}>{timer}s</Text>
-                  <Pressable
-                    style={styles.orderCardButton}
-                    onPress={() => acceptOrder(order)}
-                  >
-                    <Text style={styles.orderCardButtonText}>Accept Order</Text>
-                  </Pressable>
-                </View>
-              ))
+                );
+              })
             )}
           </ScrollView>
         </View>
@@ -376,33 +453,19 @@ const DHomeScreen = ({ navigation }) => {
           </Text>
         </View>
       )}
-      <ToggleOnlineStatus isOnline={isOnline} toggleOnlineStatus={toggleOnlineStatus} />
+      <Pressable
+        onPress={toggleOnlineStatus}
+        style={[styles.toggleButton, !isOnline && styles.toggleButtonOffline]}
+      >
+        <Text style={styles.toggleText}>{isOnline ? "Go Offline" : "Go Online"}</Text>
+      </Pressable>
       <Logout navigation={navigation} />
-      <Text style={styles.balanceText}>Business Balance: Rs {businessBalance}</Text>
+      <Text style={styles.balanceText}>Business Balance: Rs {businessBalance.toFixed(2)}</Text>
     </View>
   );
 };
 
-const ToggleOnlineStatus = ({ isOnline, toggleOnlineStatus }) => (
-  <Pressable
-    onPress={toggleOnlineStatus}
-    style={[styles.toggleButton, !isOnline && styles.toggleButtonOffline]}
-  >
-    <Text style={styles.toggleText}>{isOnline ? "Go Offline" : "Go Online"}</Text>
-  </Pressable>
-);
-
 const styles = StyleSheet.create({
-  placeholderImage: {
-    backgroundColor: "#E0E0E0",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  placeholderText: {
-    color: "#666",
-    fontSize: 12,
-    fontFamily: "Inter-Regular",
-  },
   container: { flex: 1, backgroundColor: "#F5F5F5" },
   onlineContainer: { flex: 1 },
   offlineContainer: {
@@ -443,6 +506,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#EEE",
   },
+  fixedPercentageCard: {
+    borderColor: '#2196F3',
+    backgroundColor: '#E3F2FD'
+  },
+  insufficientBalanceCard: {
+    borderColor: '#FF5722',
+    backgroundColor: '#FFF3E0'
+  },
   userInfoContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -457,6 +528,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  placeholderImage: {
+    backgroundColor: "#E0E0E0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  placeholderText: {
+    color: "#666",
+    fontSize: 12,
+    fontFamily: "Inter-Regular",
+  },
   orderTitle: {
     fontFamily: "Inter-Bold",
     fontSize: 18,
@@ -469,11 +550,21 @@ const styles = StyleSheet.create({
     fontFamily: "Inter-Regular",
     marginVertical: 4,
   },
+  fixedPercentageText: {
+    color: '#1976D2',
+    fontWeight: 'bold'
+  },
   countPrice: {
     fontSize: 16,
     color: "#2E7D32",
     fontFamily: "Inter-SemiBold",
     marginTop: 8,
+  },
+  warningText: {
+    color: '#FF5722',
+    fontSize: 12,
+    fontFamily: "Inter-SemiBold",
+    marginTop: 4
   },
   countdownText: {
     fontSize: 14,
@@ -492,6 +583,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
+  },
+  disabledButton: {
+    backgroundColor: '#9E9E9E'
   },
   orderCardButtonText: {
     color: "#FFF",

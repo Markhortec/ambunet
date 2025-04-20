@@ -11,7 +11,7 @@ import {
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import MapViewDirections from "react-native-maps-directions";
 import firestore from "@react-native-firebase/firestore";
-
+import AsyncStorage from "@react-native-async-storage/async-storage";
 const GOOGLE_MAPS_APIKEY = "AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM";
 
 // Same distance calculation function as in DriverTrack
@@ -90,7 +90,12 @@ const UserTrack = ({ route, navigation }) => {
 
             if (data.status === "Completed" && rideStatus !== "Completed") {
               Alert.alert("Ride Completed", "Your ride has been completed");
-              navigation.goBack();
+              (async () => {
+                await AsyncStorage.clear();
+                dispatch(resetOrderData());
+                console.log("Order is completed");
+                navigation.goBack();
+              })();
             }
           } else {
             setError("No order found.");

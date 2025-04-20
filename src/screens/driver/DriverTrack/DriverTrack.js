@@ -11,8 +11,13 @@ import {
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import MapViewDirections from "react-native-maps-directions";
 import firestore from "@react-native-firebase/firestore";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useDispatch } from "react-redux";
+import { resetOrderData } from "../../../redux/driverOrderSlice";
 
 const GOOGLE_MAPS_APIKEY = "AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM";
+const ARRIVAL_DISTANCE_THRESHOLD = 40; // meters
+const COMPLETION_DISTANCE_THRESHOLD = 60; // meters
 
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const R = 6371e3;
@@ -30,6 +35,7 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 };
 
 const DriverTrack = ({ route, navigation }) => {
+  const dispatch = useDispatch();
   const { orderId } = route.params;
   const [orderData, setOrderData] = useState(null);
   const [currentLocation, setCurrentLocation] = useState(null);
@@ -39,7 +45,8 @@ const DriverTrack = ({ route, navigation }) => {
   const [loading, setLoading] = useState(true);
   const [hasArrived, setHasArrived] = useState(false);
   const [distanceToOrigin, setDistanceToOrigin] = useState(null);
-
+  const [distanceToDestination, setDistanceToDestination] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false); // Add this line
   useEffect(() => {
     const unsubscribe = firestore()
       .collection("orders")
@@ -81,63 +88,147 @@ const DriverTrack = ({ route, navigation }) => {
   }, [orderId]);
 
   useEffect(() => {
-    if (!currentLocation || !origin) return;
+    if (!currentLocation || !origin || !destination) return;
 
     const interval = setInterval(() => {
-      const distance = calculateDistance(
+      // Calculate distance to origin
+      const originDistance = calculateDistance(
         currentLocation.latitude,
         currentLocation.longitude,
         origin.latitude,
         origin.longitude
       );
-      setDistanceToOrigin(distance);
-      
-      if (distance <= 50 && !hasArrived) {
-        handleArrived();
-      }
-    }, 5000);
+      setDistanceToOrigin(originDistance);
 
-    return () => clearInterval(interval);
-  }, [currentLocation, origin, hasArrived]);
-
-  const handleArrived = async () => {
-    try {
-      setHasArrived(true);
-      Alert.alert("Arrived", "You have reached the pickup location");
-      
-      await firestore().collection("orders").doc(orderId).update({
-        status: "Arrived",
-      });
-    } catch (error) {
-      console.error("Error updating ride status:", error);
-    }
-  };
-
-  const handleCompleteRide = async () => {
-    try {
-      if (!currentLocation || !destination) return;
-      
-      const distanceToDest = calculateDistance(
+      // Calculate distance to destination
+      const destDistance = calculateDistance(
         currentLocation.latitude,
         currentLocation.longitude,
         destination.latitude,
         destination.longitude
       );
-      
-      if (distanceToDest > 50) {
-        Alert.alert("Not at Destination", "You must be at the destination to complete the ride");
+      setDistanceToDestination(destDistance);
+
+      // Update arrival status
+      if (originDistance <= ARRIVAL_DISTANCE_THRESHOLD && !hasArrived) {
+        setHasArrived(true);
+      } else if (originDistance > ARRIVAL_DISTANCE_THRESHOLD) {
+        setHasArrived(false);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [currentLocation, origin, destination, hasArrived]);
+
+  const handleArrived = async () => {
+    try {
+      await firestore().collection("orders").doc(orderId).update({
+        status: "Arrived",
+      });
+      Alert.alert("Arrived", "You have reached the pickup location");
+    } catch (error) {
+      console.error("Error updating ride status:", error);
+      Alert.alert("Error", "Failed to update arrival status");
+    }
+  };
+
+  const handleCompleteRide = async () => {
+    setIsProcessing(true);
+    try {
+      // 1. Validate all required data exists
+      if (!currentLocation || !destination || !orderData?.ambulanceRegNo) {
+        Alert.alert(
+          "Cannot Complete Ride",
+          "System is missing required data. Please try again."
+        );
         return;
       }
-
-      await firestore().collection("orders").doc(orderId).update({
-        status: "Completed",
-        completedAt: firestore.FieldValue.serverTimestamp(),
+  
+      // 2. Calculate the final amount
+      const amount = orderData.calculatedPrice || 
+                   (orderData.vehicle?.price * (orderData.pricePercentage || 18) / 100);
+  
+      // 3. Execute Firestore transaction
+      await firestore().runTransaction(async (transaction) => {
+        // Get references to all documents needed
+        const orderRef = firestore().collection("orders").doc(orderId);
+        const earningsRef = firestore().collection("earnings").doc("8zX7cl2nm3v76i17FrJD");
+        const ambulanceRef = firestore().collection("ambulances").doc(orderData.ambulanceRegNo);
+        
+        // Get all documents in parallel
+        const [orderDoc, earningsDoc, ambulanceDoc] = await Promise.all([
+          transaction.get(orderRef),
+          transaction.get(earningsRef),
+          transaction.get(ambulanceRef)
+        ]);
+  
+        // Verify ambulance exists and get company reference
+        if (!ambulanceDoc.exists) {
+          throw new Error("Ambulance record not found");
+        }
+        const companyId = ambulanceDoc.data().companyId;
+        const companyRef = firestore().collection("businesses").doc(companyId);
+        const companyDoc = await transaction.get(companyRef);
+  
+        // Verify company exists and has sufficient balance
+        if (!companyDoc.exists) {
+          throw new Error("Company account not found");
+        }
+        if ((companyDoc.data().balance || 0) < amount) {
+          throw new Error(`Company has insufficient balance (₹${companyDoc.data().balance} available)`);
+        }
+  
+        // Initialize earnings if empty
+        if (!earningsDoc.exists) {
+          transaction.set(earningsRef, {
+            balance: 0,
+            updatedAt: firestore.FieldValue.serverTimestamp()
+          });
+        }
+  
+        // Perform all updates atomically
+        transaction.update(companyRef, {
+          balance: firestore.FieldValue.increment(-amount),
+          updatedAt: firestore.FieldValue.serverTimestamp()
+        });
+  
+        transaction.update(earningsRef, {
+          balance: firestore.FieldValue.increment(amount),
+          updatedAt: firestore.FieldValue.serverTimestamp()
+        });
+  
+        transaction.update(orderRef, {
+          status: "Completed",
+          completedAt: firestore.FieldValue.serverTimestamp(),
+          paymentStatus: "processed",
+          financialDetails: {
+            amountTransferred: amount,
+            companyId: companyId,
+            processedAt: firestore.FieldValue.serverTimestamp()
+          }
+        });
       });
-
-      Alert.alert("Ride Completed", "The ride has been marked as completed");
-      navigation.goBack();
+  
+      // 4. On success
+      Alert.alert(
+        "Ride Completed",
+        "Payment processed successfully!\n" +
+        `Amount: ₹${amount.toFixed(2)}`
+      );
+  
+      // 5. Clean up and navigate
+      await AsyncStorage.removeItem('driverOrderId');
+      dispatch(resetOrderData());
+      navigation.navigate("DHomeScreen");
+  
     } catch (error) {
-      console.error("Error completing ride:", error);
+      console.error("Ride completion failed:", error);
+      Alert.alert(
+        "Completion Error",
+        error.message || "Failed to complete ride. Please try again."
+      );
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -158,14 +249,43 @@ const DriverTrack = ({ route, navigation }) => {
     );
   }
 
+  const isWithinCompletionDistance = distanceToDestination <= COMPLETION_DISTANCE_THRESHOLD;
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.statusText}>Ride Status: {rideStatus}</Text>
+        
         {distanceToOrigin !== null && (
-          <Text style={styles.distanceText}>
-            Distance to pickup: {(distanceToOrigin / 1000).toFixed(2)} km
-          </Text>
+          <>
+            <Text style={styles.distanceText}>
+              Distance to pickup: {(distanceToOrigin / 1000).toFixed(2)} km
+            </Text>
+            {rideStatus === "In Progress" && (
+              <Text style={[
+                styles.distanceStatus,
+                hasArrived ? styles.successText : styles.warningText
+              ]}>
+                {hasArrived ? "Within arrival range (40m)" : "Not in arrival range yet"}
+              </Text>
+            )}
+          </>
+        )}
+
+        {distanceToDestination !== null && rideStatus === "Arrived" && (
+          <>
+            <Text style={styles.distanceText}>
+              Distance to destination: {(distanceToDestination / 1000).toFixed(2)} km
+            </Text>
+            <Text style={[
+              styles.distanceStatus,
+              isWithinCompletionDistance ? styles.successText : styles.warningText
+            ]}>
+              {isWithinCompletionDistance 
+                ? "Within completion range (60m)" 
+                : "Not in completion range yet"}
+            </Text>
+          </>
         )}
       </View>
       
@@ -227,23 +347,30 @@ const DriverTrack = ({ route, navigation }) => {
           <Text style={styles.detailText}>Pickup: {origin.name || "N/A"}</Text>
           <Text style={styles.detailText}>Destination: {destination.name || "N/A"}</Text>
           <Text style={styles.detailText}>Vehicle: {orderData.vehicle?.type || "N/A"}</Text>
-          <Text style={styles.detailText}>Price: Rs. {orderData.vehicle?.price?.toFixed(2) || "N/A"}</Text>
+          <Text style={styles.detailText}>Base Price: ₹{orderData.vehicle?.price?.toFixed(2) || "N/A"}</Text>
+          <Text style={styles.detailText}>Applied Percentage: {orderData.pricePercentage || 18}%</Text>
+          <Text style={[styles.detailText, styles.boldText]}>
+            Final Price: ₹{orderData.calculatedPrice?.toFixed(2) || 
+              ((orderData.vehicle?.price * (orderData.pricePercentage || 18) / 100).toFixed(2))}
+          </Text>
         </View>
       </ScrollView>
       
       <View style={styles.buttonContainer}>
-        {rideStatus === "In Progress" && !hasArrived && (
+        {rideStatus === "In Progress" && (
           <Button 
-            title="I've Arrived" 
+            title={hasArrived ? "I've Arrived" : "Approaching Pickup"}
             onPress={handleArrived} 
             color="#4CAF50"
+            disabled={!hasArrived || isProcessing}
           />
         )}
         {rideStatus === "Arrived" && (
           <Button 
-            title="Complete Ride" 
+            title={isProcessing ? "Processing..." : "Complete Ride"}
             onPress={handleCompleteRide} 
             color="#2196F3"
+            disabled={!isWithinCompletionDistance || isProcessing}
           />
         )}
       </View>
@@ -273,6 +400,17 @@ const styles = StyleSheet.create({
     textAlign: "center",
     color: "#666",
     marginTop: 5,
+  },
+  distanceStatus: {
+    fontSize: 14,
+    textAlign: "center",
+    marginTop: 5,
+  },
+  warningText: {
+    color: "#FF5722",
+  },
+  successText: {
+    color: "#4CAF50",
   },
   map: {
     flex: 1,
@@ -312,6 +450,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#555",
     marginBottom: 8,
+  },
+  boldText: {
+    fontWeight: "bold",
+    color: "#2E7D32",
   },
   buttonContainer: {
     padding: 15,
