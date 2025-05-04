@@ -7,15 +7,22 @@ import {
   PermissionsAndroid,
   Image,
   ScrollView,
-  Alert
+  Alert,
+  Modal,
+  TextInput,
+  ActivityIndicator,
+  TouchableOpacity,
+  SafeAreaView
 } from "react-native";
 import Geolocation from "react-native-geolocation-service";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import firestore from "@react-native-firebase/firestore";
 import Logout from "../../../components/owner/Logout";
-import { useDispatch } from "react-redux";
+import { useDispatch } from 'react-redux';
 import { setOrderData } from '../../../redux/driverOrderSlice';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 
 const DHomeScreen = ({ navigation }) => {
   const [orders, setOrders] = useState([]);
@@ -27,6 +34,9 @@ const DHomeScreen = ({ navigation }) => {
   const [timer, setTimer] = useState(60);
   const [businessBalance, setBusinessBalance] = useState(0);
   const [priceRules, setPriceRules] = useState([]);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedInfo, setEditedInfo] = useState({});
   const dispatch = useDispatch();
 
   useEffect(() => {
@@ -34,7 +44,110 @@ const DHomeScreen = ({ navigation }) => {
     fetchPriceRules();
   }, []);
 
-  // Fetch price rules from Firestore
+  // Add this useEffect to log driver ID
+  useEffect(() => {
+    const fetchAndLogDriverId = async () => {
+      try {
+        const storedDriver = await AsyncStorage.getItem('driverData');
+        if (storedDriver) {
+          const driverData = JSON.parse(storedDriver);
+          const driverId = driverData.driverId;
+          console.log('Driver ID:', driverId);
+        } else {
+          console.log('No driver data found in AsyncStorage');
+        }
+      } catch (error) {
+        console.error('Error fetching driver ID:', error);
+      }
+    };
+
+    fetchAndLogDriverId();
+  }, []);
+
+  const fetchDriverData = async () => {
+    try {
+      const storedDriver = await AsyncStorage.getItem("driverData");
+      if (!storedDriver) {
+        console.error("Driver data not found in AsyncStorage");
+        return;
+      }
+      const parsedDriver = JSON.parse(storedDriver);
+      const { driverId, phoneNumber } = parsedDriver;
+      
+      if (phoneNumber && driverId) {
+        const driverDoc = await firestore().collection("drivers").doc(driverId).get();
+        if (driverDoc.exists) {
+          const driverData = { id: driverId, ...driverDoc.data() };
+          setDriverData(driverData);
+          setEditedInfo({
+            name: driverData.name,
+            email: driverData.email,
+            phoneNumber: driverData.phoneNumber,
+            address: driverData.address || '',
+            cnicNumber: driverData.cnicNumber || ''
+          });
+          requestLocationPermission();
+          fetchBusinessBalance(driverData.companyId);
+        } else {
+          console.error("Driver not found in Firestore");
+        }
+      } else {
+        console.error("Driver phone number or ID not found in AsyncStorage");
+      }
+    } catch (error) {
+      console.error("Error fetching driver data:", error);
+    }
+  };
+
+  const updateDriverProfile = async () => {
+    try {
+      setLoading(true);
+      const { id } = driverData;
+      
+      await firestore().collection('drivers').doc(id).update({
+        name: editedInfo.name,
+        email: editedInfo.email,
+        phoneNumber: editedInfo.phoneNumber,
+        address: editedInfo.address,
+        cnicNumber: editedInfo.cnicNumber
+      });
+      
+      // Update local state
+      setDriverData(prev => ({
+        ...prev,
+        name: editedInfo.name,
+        email: editedInfo.email,
+        phoneNumber: editedInfo.phoneNumber,
+        address: editedInfo.address,
+        cnicNumber: editedInfo.cnicNumber
+      }));
+      
+      setIsEditing(false);
+      setLoading(false);
+      
+    } catch (error) {
+      console.error("Error updating driver data:", error);
+      Alert.alert("Error", "Failed to update profile");
+      setLoading(false);
+    }
+  };
+
+  const toggleMenu = () => {
+    setMenuVisible(!menuVisible);
+    setIsEditing(false);
+  };
+
+  const handleEdit = () => {
+    setIsEditing(true);
+  };
+
+  const handleInputChange = (field, value) => {
+    setEditedInfo(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
   const fetchPriceRules = async () => {
     try {
       const querySnapshot = await firestore().collection('priceRules').get();
@@ -49,53 +162,14 @@ const DHomeScreen = ({ navigation }) => {
     }
   };
 
-  // Calculate price percentage based on distance
   const calculatePriceBasedOnDistance = (distance) => {
     if (!priceRules.length) return 18;
     const applicableRule = priceRules.find(rule => distance <= rule.distance);
     return applicableRule ? applicableRule.percentage : 18;
   };
 
-  // Check if business has sufficient balance
   const checkBusinessBalance = (orderPrice) => {
     return businessBalance >= orderPrice;
-  };
-
-  // Interval-based location updates
-  useEffect(() => {
-    let locationInterval;
-    if (isOnline) {
-      fetchCurrentLocation();
-      locationInterval = setInterval(fetchCurrentLocation, 2000);
-    }
-    return () => clearInterval(locationInterval);
-  }, [isOnline]);
-
-  const fetchDriverData = async () => {
-    try {
-      const storedDriver = await AsyncStorage.getItem("driverData");
-      if (!storedDriver) {
-        console.error("Driver data not found in AsyncStorage");
-        return;
-      }
-      const parsedDriver = JSON.parse(storedDriver);
-      const { driverId, phoneNumber } = parsedDriver;
-      if (phoneNumber && driverId) {
-        const driverDoc = await firestore().collection("drivers").doc(driverId).get();
-        if (driverDoc.exists) {
-          const driverData = { id: driverId, ...driverDoc.data() };
-          setDriverData(driverData);
-          requestLocationPermission();
-          fetchBusinessBalance(driverData.companyId);
-        } else {
-          console.error("Driver not found in Firestore");
-        }
-      } else {
-        console.error("Driver phone number or ID not found in AsyncStorage");
-      }
-    } catch (error) {
-      console.error("Error fetching driver data:", error);
-    }
   };
 
   const fetchBusinessBalance = async (companyId) => {
@@ -337,7 +411,163 @@ const DHomeScreen = ({ navigation }) => {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      {/* Menu Button */}
+      <TouchableOpacity 
+        style={styles.menuButton} 
+        onPress={toggleMenu}
+      >
+        <Ionicons name="menu" size={30} color="black" />
+      </TouchableOpacity>
+
+      {/* Profile Menu Modal */}
+      <Modal
+        visible={menuVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={toggleMenu}
+      >
+        <View style={styles.modalOverlay} onPress={toggleMenu}>
+          <View style={styles.modalContainer}>
+            {/* Close button at top right */}
+            <TouchableOpacity 
+              style={styles.closeButton} 
+              onPress={toggleMenu}
+            >
+              <Ionicons name="close" size={24} color="#F70000" />
+            </TouchableOpacity>
+            
+            <Text style={styles.modalTitle}>Driver Profile</Text>
+            
+            {driverData && (
+              <ScrollView style={styles.profileInfoContainer}>
+                {isEditing ? (
+                  <>
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Name:</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editedInfo.name}
+                        onChangeText={(text) => handleInputChange('name', text)}
+                      />
+                    </View>
+                    
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Email:</Text>
+                      <Text style={styles.nonEditableField}>{driverData.email}</Text>
+                    </View>
+                    
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Phone:</Text>
+                      <Text style={styles.nonEditableField}>{driverData.phoneNumber}</Text>
+                    </View>
+
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>CNIC Number:</Text>
+                      <Text style={styles.nonEditableField}>{driverData.cnicNumber || 'N/A'}</Text>
+                    </View>
+
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Address:</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editedInfo.address}
+                        onChangeText={(text) => handleInputChange('address', text)}
+                        multiline
+                      />
+                    </View>
+                    
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Status:</Text>
+                      <Text style={styles.nonEditableField}>{driverData.driverStatus}</Text>
+                    </View>
+
+                    {/* <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Assigned Ambulance:</Text>
+                      <Text style={styles.nonEditableField}>{driverData.assignedAmbulance}</Text>
+                    </View> */}
+                    
+                    <TouchableOpacity 
+                      style={styles.saveButton} 
+                      onPress={updateDriverProfile}
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <ActivityIndicator size="small" color="#FFF" />
+                      ) : (
+                        <Text style={styles.saveButtonText}>Save Changes</Text>
+                      )}
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                      style={styles.cancelButton} 
+                      onPress={() => setIsEditing(false)}
+                    >
+                      <Text style={styles.cancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    {driverData.profilePhoto ? (
+                      <Image
+                        source={{ uri: driverData.profilePhoto }}
+                        style={styles.profileImage}
+                      />
+                    ) : (
+                      <View style={styles.profilePlaceholder}>
+                        <Icon name="account" size={60} color="#666" />
+                      </View>
+                    )}
+                    
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Name:</Text>
+                      <Text style={styles.infoText}>{driverData.name}</Text>
+                    </View>
+                    
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Email:</Text>
+                      <Text style={styles.infoText}>{driverData.email}</Text>
+                    </View>
+                    
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Phone:</Text>
+                      <Text style={styles.infoText}>{driverData.phoneNumber}</Text>
+                    </View>
+
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>CNIC Number:</Text>
+                      <Text style={styles.infoText}>{driverData.cnicNumber || 'N/A'}</Text>
+                    </View>
+
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Address:</Text>
+                      <Text style={styles.infoText}>{driverData.address || 'N/A'}</Text>
+                    </View>
+                    
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Status:</Text>
+                      <Text style={styles.infoText}>{driverData.driverStatus}</Text>
+                    </View>
+
+                    {/* <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Assigned Ambulance:</Text>
+                      <Text style={styles.infoText}>{driverData.assignedAmbulance || 'Not assigned'}</Text>
+                    </View>
+                     */}
+                    <TouchableOpacity 
+                      style={styles.editButton} 
+                      onPress={handleEdit}
+                    >
+                      <Text style={styles.editButtonText}>Edit Profile</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       {isOnline ? (
         <View style={styles.onlineContainer}>
           {currentLocation ? (
@@ -461,18 +691,39 @@ const DHomeScreen = ({ navigation }) => {
       </Pressable>
       <Logout navigation={navigation} />
       <Text style={styles.balanceText}>Business Balance: Rs {businessBalance.toFixed(2)}</Text>
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5F5F5" },
-  onlineContainer: { flex: 1 },
+  container: { 
+    flex: 1, 
+    backgroundColor: "#F5F5F5" 
+  },
+  menuButton: {
+    position: "absolute",
+    top: 50,
+    left: 20,
+    zIndex: 10,
+    backgroundColor: "white",
+    padding: 10,
+    borderRadius: 50,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  onlineContainer: { 
+    flex: 1,
+    marginTop: 60 
+  },
   offlineContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#FFFFFF",
+    marginTop: 60
   },
   map: {
     flex: 1,
@@ -644,6 +895,132 @@ const styles = StyleSheet.create({
     color: "#2E7D32",
     fontFamily: "Inter-SemiBold",
     marginBottom: 16,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContainer: {
+    width: '80%',
+    height: '100%',
+    backgroundColor: '#FFF',
+    padding: 20,
+  },
+  closeButton: {
+    alignSelf: 'flex-end',
+    padding: 10,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#F70000',
+    textAlign: 'center',
+  },
+  profileInfoContainer: {
+    marginTop: 20,
+  },
+  profileImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  profilePlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#EEE',
+    alignSelf: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEE',
+  },
+  infoLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#555',
+  },
+  infoText: {
+    fontSize: 16,
+    color: '#333',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    textAlign: 'right',
+    maxWidth: '60%',
+  },
+  inputContainer: {
+    marginBottom: 15,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEE',
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#555',
+    marginBottom: 5,
+  },
+  input: {
+    fontSize: 16,
+    color: '#333',
+    borderWidth: 1,
+    borderColor: '#DDD',
+    borderRadius: 5,
+    padding: 8,
+  },
+  nonEditableField: {
+    fontSize: 16,
+    color: '#333',
+    padding: 8,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 5,
+  },
+  editButton: {
+    backgroundColor: '#F70000',
+    padding: 12,
+    borderRadius: 5,
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  editButtonText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  saveButton: {
+    backgroundColor: '#F70000',
+    padding: 12,
+    borderRadius: 5,
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  cancelButton: {
+    backgroundColor: '#DDD',
+    padding: 12,
+    borderRadius: 5,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#333',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });
 

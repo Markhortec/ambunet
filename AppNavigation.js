@@ -39,25 +39,33 @@ import UserTrack from "./src/screens/user/UserTrack/UserTrack";
 import DriversListScreen from "./src/screens/owner/DriversListScreen";
 import AmbulancesListScreen from "./src/screens/owner/AmbulancesListScreen";
 import { useAuth } from "./src/hooks/useAuth";
+import CustomDrawer from "./src/components/user/CustomDrawer ";
 // Create navigators
 const Stack = createStackNavigator();
 const Drawer = createDrawerNavigator();
 
 const DrawerNavigator = () => (
   <Drawer.Navigator
+    drawerContent={(props) => <CustomDrawer {...props} />}
     screenOptions={{
-      drawerStyle: { width: 250 },
+      drawerStyle: { width: 300 },
       headerShown: false,
+      drawerPosition: 'left',
+      swipeEnabled: true,
     }}
   >
-    <Drawer.Screen name="Home" component={HomeScreen} />
+    
+    <Drawer.Screen 
+      name="Home" 
+      component={HomeScreen} 
+      options={{
+        drawerIcon: ({ color, size }) => (
+          <Ionicons name="home-outline" size={size} color={color} />
+        ),
+      }}
+    />
   </Drawer.Navigator>
 );
-
-// Main App Stack Navigator
-// const AppStackNavigator = () => (
-  
-// );
 
 const AppNavigation = () => {
   const { loading } = useAuth();
@@ -95,7 +103,7 @@ const AppNavigation = () => {
     <Stack.Screen name="OrderScreen" component={OrderScreen} options={{ headerShown: false }} />
     <Stack.Screen name="DriverLoginScreen" component={DriverLoginScreen} />
     <Stack.Screen name="DriverHomeScreen" component={DriverHomeScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="DHomeScreen" component={DHomeScreen} />
+    <Stack.Screen name="DHomeScreen" component={DHomeScreen} options={{ headerShown: false }}/>
     <Stack.Screen name="NewOrderPopup" component={NewOrderPopup} options={{ headerShown: false }} />
     <Stack.Screen name="DriverTrack" component={DriverTrack} options={{ headerShown: false }} />
     <Stack.Screen name="UserTrack" component={UserTrack} options={{ headerShown: false }} />

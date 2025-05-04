@@ -1,202 +1,1058 @@
-import React, { useEffect } from 'react';
-import AppNavigation from './AppNavigation';
-import { Provider } from 'react-redux';
-import { store } from './src/redux/store';
-import SplashScreen from 'react-native-splash-screen';
-import NetInfo from '@react-native-community/netinfo';
-// import analytics from '@react-native-firebase/analytics';
-import { Text } from 'react-native'; // Import Text
+import React, { useState, useEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  PermissionsAndroid,
+  Image,
+  ScrollView,
+  Alert
+} from "react-native";
+import Geolocation from "react-native-geolocation-service";
+import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import firestore from "@react-native-firebase/firestore";
+import Logout from "../../../components/owner/Logout";
+import { useDispatch } from "react-redux";
+import { setOrderData } from '../../../redux/driverOrderSlice';
 
-class ErrorBoundary extends React.Component {
-    constructor(props) {
-        super(props);
-        this.state = { hasError: false };
+const DHomeScreen = ({ navigation }) => {
+  const [orders, setOrders] = useState([]);
+  const [isOnline, setIsOnline] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [driverData, setDriverData] = useState(null);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [timer, setTimer] = useState(60);
+  const [businessBalance, setBusinessBalance] = useState(0);
+  const [priceRules, setPriceRules] = useState([]);
+  const dispatch = useDispatch();
+
+  useEffect(() => {
+    fetchDriverData();
+    fetchPriceRules();
+  }, []);
+
+  // Fetch price rules from Firestore
+  const fetchPriceRules = async () => {
+    try {
+      const querySnapshot = await firestore().collection('priceRules').get();
+      const rules = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      rules.sort((a, b) => a.distance - b.distance);
+      setPriceRules(rules);
+    } catch (error) {
+      console.error("Error fetching price rules:", error);
     }
+  };
 
-    static getDerivedStateFromError(error) {
-        return { hasError: true };
+  // Calculate price percentage based on distance
+  const calculatePriceBasedOnDistance = (distance) => {
+    if (!priceRules.length) return 18;
+    const applicableRule = priceRules.find(rule => distance <= rule.distance);
+    return applicableRule ? applicableRule.percentage : 18;
+  };
+
+  // Check if business has sufficient balance
+  const checkBusinessBalance = (orderPrice) => {
+    return businessBalance >= orderPrice;
+  };
+
+  // Interval-based location updates
+  useEffect(() => {
+    let locationInterval;
+    if (isOnline) {
+      fetchCurrentLocation();
+      locationInterval = setInterval(fetchCurrentLocation, 2000);
     }
-
-    componentDidCatch(error, errorInfo) {
-        console.error("Error caught by ErrorBoundary:", error, errorInfo);
-    }
-
-    render() {
-        if (this.state.hasError) {
-            return <Text>Something went wrong. Please reload the app.</Text>; // Use Text
-        }
-        return this.props.children;
-    }
-}
-
-const App = () => {
-    useEffect(() => {
-        SplashScreen.hide(); // Hide splash screen
-        // analytics().logAppOpen(); // Log app open event
-
-        const unsubscribe = NetInfo.addEventListener(state => {
-            console.log('Is connected?', state.isConnected);
+    return () => clearInterval(locationInterval);
+  }, [isOnline]);
+// Add this useEffect hook near your other useEffect hooks in DHomeScreen
+useEffect(() => {
+  const fetchAndLogDriverId = async () => {
+    try {
+      const storedDriver = await AsyncStorage.getItem('driverData');
+      if (storedDriver) {
+        const driverData = JSON.parse(storedDriver);
+        const driverId = driverData.driverId;
+        console.log('Driver ID:', driverId);
+        
+        // You can also log additional driver info if needed
+        console.log('Driver Info:', {
+          name: driverData.name,
+          phone: driverData.phoneNumber,
+          
         });
+      } else {
+        console.log('No driver data found in AsyncStorage');
+      }
+    } catch (error) {
+      console.error('Error fetching driver ID:', error);
+    }
+  };
 
-        return () => unsubscribe();
-    }, []);
+  fetchAndLogDriverId();
+}, []);
+  const fetchDriverData = async () => {
+    try {
+      const storedDriver = await AsyncStorage.getItem("driverData");
+      if (!storedDriver) {
+        console.error("Driver data not found in AsyncStorage");
+        return;
+      }
+      const parsedDriver = JSON.parse(storedDriver);
+      const { driverId, phoneNumber } = parsedDriver;
+      if (phoneNumber && driverId) {
+        const driverDoc = await firestore().collection("drivers").doc(driverId).get();
+        if (driverDoc.exists) {
+          const driverData = { id: driverId, ...driverDoc.data() };
+          setDriverData(driverData);
+          requestLocationPermission();
+          fetchBusinessBalance(driverData.companyId);
+        } else {
+          console.error("Driver not found in Firestore");
+        }
+      } else {
+        console.error("Driver phone number or ID not found in AsyncStorage");
+      }
+    } catch (error) {
+      console.error("Error fetching driver data:", error);
+    }
+  };
 
-    return (
-        <Provider store={store}>
-            <ErrorBoundary>
-             <AppNavigation />
-            </ErrorBoundary>
-        </Provider>
+  const fetchBusinessBalance = async (companyId) => {
+    try {
+      const businessDoc = await firestore().collection("businesses").doc(companyId).get();
+      if (businessDoc.exists) {
+        const businessData = businessDoc.data();
+        setBusinessBalance(businessData.balance || 0);
+      } else {
+        console.error("Business not found in Firestore");
+      }
+    } catch (error) {
+      console.error("Error fetching business balance:", error);
+    }
+  };
+
+  const requestLocationPermission = async () => {
+    try {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        {
+          title: "Location Permission",
+          message: "This app requires access to your location.",
+          buttonNeutral: "Ask Me Later",
+          buttonNegative: "Cancel",
+          buttonPositive: "OK",
+        }
+      );
+      if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+        fetchCurrentLocation();
+      } else {
+        console.warn("Location permission denied");
+      }
+    } catch (err) {
+      console.warn("Permission request error:", err);
+    }
+  };
+
+  const fetchCurrentLocation = () => {
+    Geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const location = { latitude, longitude };
+        setCurrentLocation(location);
+        updateDriverLocationInFirestore(latitude, longitude);
+      },
+      (error) => console.error("Geolocation error:", error),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
     );
+  };
+
+  const updateDriverLocationInFirestore = async (latitude, longitude) => {
+    if (!driverData || !driverData.assignedAmbulance) return;
+
+    try {
+      const ambulanceDoc = await firestore()
+        .collection("ambulances")
+        .doc(driverData.assignedAmbulance)
+        .get();
+
+      if (ambulanceDoc.exists) {
+        const ambulanceData = ambulanceDoc.data();
+        const ambulanceRegNo = ambulanceData?.registrationNumber || "N/A";
+
+        await firestore()
+          .collection("duty")
+          .doc(driverData.id)
+          .set(
+            {
+              name: driverData.name || "N/A",
+              phone: driverData.phoneNumber || "N/A",
+              ambulanceRegNo: ambulanceRegNo,
+              latitude: latitude || 0,
+              longitude: longitude || 0,
+              status: isOnline ? "Online" : "Offline",
+              updatedAt: firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+      } else {
+        console.error("Ambulance not found in Firestore.");
+      }
+    } catch (error) {
+      console.error("Error updating driver location in Firestore:", error);
+    }
+  };
+
+  const updateDriverStatusInFirestore = async (status) => {
+    if (!driverData || !currentLocation) return;
+
+    try {
+      const ambulanceDoc = await firestore()
+        .collection("ambulances")
+        .doc(driverData.assignedAmbulance)
+        .get();
+
+      if (ambulanceDoc.exists) {
+        const ambulanceData = ambulanceDoc.data();
+        const ambulanceRegNo = ambulanceData?.registrationNumber || "N/A";
+
+        await firestore()
+          .collection("duty")
+          .doc(driverData.id)
+          .set(
+            {
+              name: driverData.name || "N/A",
+              phone: driverData.phoneNumber || "N/A",
+              ambulanceRegNo: ambulanceRegNo,
+              latitude: currentLocation.latitude || 0,
+              longitude: currentLocation.longitude || 0,
+              status: status ? "Online" : "Offline",
+              updatedAt: firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+      } else {
+        console.error("Ambulance not found in Firestore.");
+      }
+    } catch (error) {
+      console.error("Error updating driver status in Firestore:", error);
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = firestore()
+      .collection("orders")
+      .where("status", "==", "Pending")
+      .onSnapshot(
+        (snapshot) => {
+          const fetchedOrders = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+          setOrders(fetchedOrders);
+          setLoading(false);
+          if (fetchedOrders.length > 0 && !selectedOrder) {
+            setSelectedOrder(fetchedOrders[0]);
+            setTimer(60);
+          }
+        },
+        (error) => {
+          console.error("Firestore error:", error);
+          setLoading(false);
+        }
+      );
+    return () => unsubscribe();
+  }, [isOnline, selectedOrder]);
+
+  useEffect(() => {
+    let interval;
+    if (selectedOrder) {
+      interval = setInterval(() => {
+        setTimer((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            setSelectedOrder(null);
+            return 60;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [selectedOrder]);
+
+  const toggleOnlineStatus = () => {
+    setIsOnline((prev) => {
+      const newStatus = !prev;
+      updateDriverStatusInFirestore(newStatus);
+      return newStatus;
+    });
+  };
+
+  const acceptOrder = async (order) => {
+    try {
+      const orderDistance = order.route?.distance || 0;
+      const pricePercentage = calculatePriceBasedOnDistance(orderDistance);
+      const basePrice = order.vehicle?.price || 0;
+      const actualPrice = (basePrice * pricePercentage) / 100;
+
+      if (!checkBusinessBalance(actualPrice)) {
+        throw new Error("Business doesn't have sufficient balance to cover this order");
+      }
+
+      await firestore().runTransaction(async (transaction) => {
+        const orderRef = firestore().collection("orders").doc(order.id);
+        const orderDoc = await transaction.get(orderRef);
+        
+        if (orderDoc.exists && orderDoc.data().status === "Pending") {
+          transaction.update(orderRef, {
+            status: "In Progress",
+            driverName: driverData.name,
+            driverPhone: driverData.phoneNumber,
+            ambulanceRegNo: driverData.assignedAmbulance,
+            driverLocation: currentLocation,
+            assignedDriverId: driverData.id,
+            calculatedPrice: actualPrice,
+            pricePercentage: pricePercentage,
+            pricingRuleApplied: pricePercentage === 18 ? "Fixed 18% (Exceeds max distance)" : "Distance-based"
+          });
+
+          dispatch(setOrderData(order.id));
+          await AsyncStorage.setItem('driverOrderId', order.id);
+        } else {
+          throw new Error("Order has already been accepted.");
+        }
+      });
+
+      navigation.navigate("DriverTrack", {
+        orderId: order.id,
+        orderDetails: {
+          id: order.id,
+          userName: order.user?.name || "N/A",
+          userPhone: order.user?.phone || "N/A",
+          originName: order.route?.origin?.name || "N/A",
+          destinationName: order.route?.destination?.name || "N/A",
+          pickupTime: order.pickupTime || "N/A",
+          type: order.type || "N/A",
+          price: actualPrice,
+          basePrice: basePrice,
+          distance: order.route?.distance || "N/A",
+          userPhoto: order.user?.photo || null,
+          pricePercentage: pricePercentage,
+          pricingRule: pricePercentage === 18 ? "Fixed 18% (Exceeds max distance)" : "Distance-based"
+        },
+        driverDetails: {
+          name: driverData.name,
+          phone: driverData.phoneNumber,
+          ambulanceRegNo: driverData.assignedAmbulance,
+          location: currentLocation,
+        },
+      });
+      setSelectedOrder(null);
+      setTimer(60);
+    } catch (error) {
+      console.error("Error accepting order:", error);
+      Alert.alert("Error", error.message || "Failed to accept order");
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      {isOnline ? (
+        <View style={styles.onlineContainer}>
+          {currentLocation ? (
+            <MapView
+              style={styles.map}
+              provider={PROVIDER_GOOGLE}
+              region={{
+                latitude: currentLocation.latitude,
+                longitude: currentLocation.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+              }}
+              showsUserLocation
+            >
+              <Marker coordinate={currentLocation}>
+                <Image
+                  source={require("../../../assets/images/a3.png")}
+                  style={styles.markerImage}
+                />
+              </Marker>
+            </MapView>
+          ) : (
+            <Text style={styles.loadingText}>Fetching location...</Text>
+          )}
+          <ScrollView style={styles.orderList}>
+            {orders.length === 0 ? (
+              <Text style={styles.noOrdersText}>No pending orders</Text>
+            ) : (
+              orders.map((order) => {
+                const orderDistance = order.route?.distance || 0;
+                const pricePercentage = calculatePriceBasedOnDistance(orderDistance);
+                const basePrice = order.vehicle?.price || 0;
+                const actualPrice = (basePrice * pricePercentage) / 100;
+                const hasSufficientBalance = checkBusinessBalance(actualPrice);
+                const isFixedPercentage = pricePercentage === 18 && 
+                  (priceRules.length > 0 && orderDistance > priceRules[priceRules.length - 1].distance);
+
+                return (
+                  <View key={order.id} style={[
+                    styles.orderCard,
+                    !hasSufficientBalance && styles.insufficientBalanceCard,
+                    isFixedPercentage && styles.fixedPercentageCard
+                  ]}>
+                    <View style={styles.userInfoContainer}>
+                      {order.user?.photo ? (
+                        <Image
+                          source={{ uri: order.user.photo }}
+                          style={styles.userImage}
+                        />
+                      ) : (
+                        <View style={[styles.userImage, styles.placeholderImage]}>
+                          <Text style={styles.placeholderText}>No Image</Text>
+                        </View>
+                      )}
+                      <Text style={styles.orderTitle}>
+                        Name: {order.user?.name || "N/A"}
+                      </Text>
+                    </View>
+                    <Text style={styles.orderDetails}>
+                      Pickup: {order.route?.origin?.name || "N/A"}
+                    </Text>
+                    <Text style={styles.orderDetails}>
+                      Drop-off: {order.route?.destination?.name || "N/A"}
+                    </Text>
+                    <Text style={styles.orderDetails}>
+                      Distance: {orderDistance.toFixed(2)} km
+                    </Text>
+                    <Text style={styles.orderDetails}>
+                      Base Price: Rs {basePrice.toFixed(2)}
+                    </Text>
+                    <Text style={[
+                      styles.orderDetails,
+                      isFixedPercentage && styles.fixedPercentageText
+                    ]}>
+                      Applied Percentage: {pricePercentage}% 
+                      {isFixedPercentage ? " (Fixed for long distance)" : ""}
+                    </Text>
+                    <Text style={styles.countPrice}>
+                      Final Price: Rs {actualPrice.toFixed(2)}
+                    </Text>
+                    {!hasSufficientBalance && (
+                      <Text style={styles.warningText}>
+                        Warning: Business balance insufficient for this order
+                      </Text>
+                    )}
+                    <Text style={styles.countdownText}>{timer}s</Text>
+                    <Pressable
+                      style={[
+                        styles.orderCardButton,
+                        !hasSufficientBalance && styles.disabledButton
+                      ]}
+                      onPress={() => acceptOrder(order)}
+                      disabled={!hasSufficientBalance}
+                    >
+                      <Text style={styles.orderCardButtonText}>
+                        {hasSufficientBalance ? "Accept Order" : "Insufficient Balance"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        </View>
+      ) : (
+        <View style={styles.offlineContainer}>
+          <Image
+            source={require("../../../assets/images/a3.png")}
+            style={styles.ambulanceIcon}
+          />
+          <Text style={styles.offlineText}>
+            You are offline. Go online to view orders.
+          </Text>
+        </View>
+      )}
+      <Pressable
+        onPress={toggleOnlineStatus}
+        style={[styles.toggleButton, !isOnline && styles.toggleButtonOffline]}
+      >
+        <Text style={styles.toggleText}>{isOnline ? "Go Offline" : "Go Online"}</Text>
+      </Pressable>
+      <Logout navigation={navigation} />
+      <Text style={styles.balanceText}>Business Balance: Rs {businessBalance.toFixed(2)}</Text>
+    </View>
+  );
 };
 
-export default App;import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, View, Alert, TouchableOpacity } from "react-native";
-import { NavigationContainer } from "@react-navigation/native";
-import { createStackNavigator } from "@react-navigation/stack";
-import { createDrawerNavigator } from "@react-navigation/drawer";
-import { useDispatch } from "react-redux";
-import auth from "@react-native-firebase/auth";
-import firestore from "@react-native-firebase/firestore";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import Ionicons from "react-native-vector-icons/Ionicons";
-import { setUserInfo } from "./src/redux/userSlice";
-import { setDriverInfo } from "./src/redux/driverSlice";
-import { Dimensions } from "react-native";
-// Import screens
-import OwnerTabNavigator from "./OwnerTabNavigator";
-import OwnerDashboardScreen from "./src/screens/owner/OwnerDashboardScreen";
-import RegistrationScreen from "./src/screens/owner/RegistrationScreen";
-import ProfileScreen from "./src/screens/owner/ProfileScreen";
-import OTPScreen from "./src/screens/owner/OTPScreen";
-import BusinessRegistrationScreen from "./src/screens/owner/BusinessRegistrationScreen";
-import AddAmbulanceScreen from "./src/screens/owner/AddAmbulanceScreen";
-import AddDriverScreen from "./src/screens/owner/AddDriverScreen";
-import AssignAmbulanceScreen from "./src/screens/owner/AssignAmbulanceScreen";
-import RoleScreen from "./src/screens/owner/RoleScreen";
-import BusinessProfileScreen from "./src/screens/owner/BusinessProfileScreen";
-import OwnerHomeScreen from "./src/screens/owner/OwnerHomeScreen";
-import DriverLoginScreen from "./src/screens/driver/DriverLoginScreen";
-import HomeScreen from "./src/screens/user/HomeScreen";
-import SplashScreen from "./src/screens/owner/SplashScreen";
-import AuthLoadingScreen from "./src/screens/owner/AuthLoadingScreen";
-import DriverHomeScreen from "./src/screens/driver/DriverHomeScreen";
-import DestinationSearch from "./src/screens/user/DestinationSearch";
-import SearchResults from "./src/screens/user/SearchResults";
-import OrderScreen from "./src/screens/user/OrderScreen";
-import DHomeScreen from "./src/screens/driver/HomeScreen";
-import NewOrderPopup from "./src/components/driver/NewOrderPopup";
-import DriverTrack from "./src/screens/driver/DriverTrack/DriverTrack";
-import UserTrack from "./src/screens/user/UserTrack/UserTrack";
-import DriversListScreen from "./src/screens/owner/DriversListScreen";
-import AmbulancesListScreen from "./src/screens/owner/AmbulancesListScreen";
-import { useAuth } from "./src/hooks/useAuth";
-// Create navigators
-const Stack = createStackNavigator();
-const Drawer = createDrawerNavigator();
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#F5F5F5" },
+  onlineContainer: { flex: 1 },
+  offlineContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  map: {
+    flex: 1,
+    height: 250,
+    borderRadius: 16,
+    margin: 16,
+    overflow: "hidden",
+  },
+  orderList: {
+    flex: 1,
+    paddingHorizontal: 16,
+    marginTop: 8,
+  },
+  noOrdersText: {
+    textAlign: "center",
+    fontSize: 16,
+    color: "#666",
+    marginTop: 24,
+    fontFamily: "Inter-Medium",
+  },
+  orderCard: {
+    backgroundColor: "#FFFFFF",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: "#EEE",
+  },
+  fixedPercentageCard: {
+    borderColor: '#2196F3',
+    backgroundColor: '#E3F2FD'
+  },
+  insufficientBalanceCard: {
+    borderColor: '#FF5722',
+    backgroundColor: '#FFF3E0'
+  },
+  userInfoContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  userImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+    backgroundColor: "#E0E0E0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  placeholderImage: {
+    backgroundColor: "#E0E0E0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  placeholderText: {
+    color: "#666",
+    fontSize: 12,
+    fontFamily: "Inter-Regular",
+  },
+  orderTitle: {
+    fontFamily: "Inter-Bold",
+    fontSize: 18,
+    color: "#1A1A1A",
+    marginBottom: 4,
+  },
+  orderDetails: {
+    fontSize: 14,
+    color: "#666",
+    fontFamily: "Inter-Regular",
+    marginVertical: 4,
+  },
+  fixedPercentageText: {
+    color: '#1976D2',
+    fontWeight: 'bold'
+  },
+  countPrice: {
+    fontSize: 16,
+    color: "#2E7D32",
+    fontFamily: "Inter-SemiBold",
+    marginTop: 8,
+  },
+  warningText: {
+    color: '#FF5722',
+    fontSize: 12,
+    fontFamily: "Inter-SemiBold",
+    marginTop: 4
+  },
+  countdownText: {
+    fontSize: 14,
+    color: "#D32F2F",
+    fontFamily: "Inter-Bold",
+    textAlign: "right",
+    marginTop: 8,
+  },
+  orderCardButton: {
+    backgroundColor: "#1976D2",
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    marginTop: 12,
+    shadowColor: "#1976D2",
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  disabledButton: {
+    backgroundColor: '#9E9E9E'
+  },
+  orderCardButtonText: {
+    color: "#FFF",
+    fontSize: 15,
+    fontFamily: "Inter-SemiBold",
+  },
+  markerImage: {
+    width: 40,
+    height: 40,
+    resizeMode: "contain",
+  },
+  loadingText: {
+    textAlign: "center",
+    fontSize: 16,
+    color: "#666",
+    fontFamily: "Inter-Regular",
+  },
+  toggleButton: {
+    backgroundColor: "#4CAF50",
+    paddingVertical: 14,
+    marginHorizontal: 16,
+    borderRadius: 12,
+    alignItems: "center",
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    flexDirection: "row",
+    justifyContent: "center",
+  },
+  toggleButtonOffline: {
+    backgroundColor: "#666666",
+  },
+  toggleText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontFamily: "Inter-SemiBold",
+  },
+  ambulanceIcon: {
+    width: 120,
+    height: 120,
+    opacity: 0.8,
+    marginBottom: 24,
+  },
+  offlineText: {
+    fontSize: 16,
+    color: "#666",
+    fontFamily: "Inter-Medium",
+    textAlign: "center",
+    paddingHorizontal: 40,
+  },
+  balanceText: {
+    textAlign: "center",
+    fontSize: 16,
+    color: "#2E7D32",
+    fontFamily: "Inter-SemiBold",
+    marginBottom: 16,
+  },
+});
 
-const DrawerNavigator = () => (
-  <Drawer.Navigator
-    screenOptions={{
-      drawerStyle: { width: 250 },
-      headerShown: false,
-    }}
-  >
-    <Drawer.Screen name="Home" component={HomeScreen} />
-  </Drawer.Navigator>
+export default DHomeScreen;import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Async thunk to fetch driver data from AsyncStorage
+export const fetchDriverData = createAsyncThunk(
+  'driver/fetchDriverData',
+  async () => {
+    try {
+      const storedDriverProfile = await AsyncStorage.getItem('driverProfile');
+      if (storedDriverProfile) {
+        return JSON.parse(storedDriverProfile);
+      }
+      return {}; // Return empty object instead of null to avoid overwriting state with null
+    } catch (error) {
+      throw new Error('Failed to load driver profile from AsyncStorage');
+    }
+  }
 );
 
-// Main App Stack Navigator
-// const AppStackNavigator = () => (
-  
-// );
+// Async thunk to save driver data to AsyncStorage
+export const saveDriverData = createAsyncThunk(
+  'driver/saveDriverData',
+  async (driverData) => {
+    try {
+      await AsyncStorage.setItem('driverProfile', JSON.stringify(driverData));
+      return driverData;
+    } catch (error) {
+      throw new Error('Failed to save driver data to AsyncStorage');
+    }
+  }
+);
 
-const AppNavigation = () => {
-  const { loading } = useAuth();
+// Driver slice definition
+const driverSlice = createSlice({
+  name: 'driver',
+  initialState: {
+    driverId: null,
+    phoneNumber: null,
+    name: null,
+    email: null,
+    status: 'idle',
+    error: null,
+  },
+  reducers: {
+    // Update driver information
+    setDriverInfo: (state, action) => {
+      const { driverId, phoneNumber, name, email } = action.payload;
+      state.driverId = driverId || state.driverId;
+      state.phoneNumber = phoneNumber || state.phoneNumber;
+      state.name = name || state.name;
+      state.email = email || state.email;
+    },
+    // Clear driver information
+    clearDriverInfo: (state) => {
+      state.driverId = null;
+      state.phoneNumber = null;
+      state.name = null;
+      state.email = null;
+    },
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchDriverData.pending, (state) => {
+        state.status = 'loading';
+      })
+      .addCase(fetchDriverData.fulfilled, (state, action) => {
+        state.status = 'succeeded';
+        const { driverId, phoneNumber, name, email } = action.payload || {};
+        state.driverId = driverId || null;
+        state.phoneNumber = phoneNumber || null;
+        state.name = name || null;
+        state.email = email || null;
+      })
+      .addCase(fetchDriverData.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.error.message;
+      })
+      .addCase(saveDriverData.fulfilled, (state, action) => {
+        state.status = 'succeeded';
+        const { driverId, phoneNumber, name, email } = action.payload;
+        state.driverId = driverId;
+        state.phoneNumber = phoneNumber;
+        state.name = name;
+        state.email = email;
+      })
+      .addCase(saveDriverData.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.error.message;
+      });
+  },
+});
+
+export const { setDriverInfo, clearDriverInfo } = driverSlice.actions;
+export default driverSlice.reducer;
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, SafeAreaView, TouchableOpacity, Dimensions, Modal, TextInput } from 'react-native';
+import { useSelector, useDispatch } from 'react-redux';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
+import { getFirestore, doc, getDoc, updateDoc } from "@react-native-firebase/firestore";
+import { setUserInfo } from "../../../redux/userSlice";
+
+const OwnerHomeScreen = ({ navigation }) => {
+  const [loading, setLoading] = useState(true);
+  const [userName, setUserName] = useState('');
+  const [profileInfo, setProfileInfo] = useState(null);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedInfo, setEditedInfo] = useState({});
+  const userId = useSelector((state) => state.user.uid);
+  const dispatch = useDispatch();
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        console.log("User ID from Redux state:", userId);
+        if (userId) {
+          const db = getFirestore();
+          const userRef = doc(db, "users", userId);
+          const userDoc = await getDoc(userRef);
+          const userData = userDoc.data();
+          console.log("User data fetched:", userData);
+          setUserName(userData.name);
+          setProfileInfo(userData);
+          setEditedInfo({
+            name: userData.name,
+            email: userData.email,
+            phoneNumber: userData.phoneNumber
+          });
+          dispatch(setUserInfo({
+            uid: userId,
+            name: userData.name,
+            email: userData.email,
+            phoneNumber: userData.phoneNumber,
+            role: userData.role,
+            userStatus: userData.userStatus,
+            message: userData.message
+          }));
+        }
+        setLoading(false);
+      } catch (error) {
+        console.error("Error fetching user data:", error);
+        setLoading(false);
+      }
+    };
+
+    fetchUserData();
+  }, [userId, dispatch]);
+
+  const toggleMenu = () => {
+    setMenuVisible(!menuVisible);
+    setIsEditing(false); // Reset editing state when closing menu
+  };
+
+  const handleEdit = () => {
+    setIsEditing(true);
+  };
+
+  const handleInputChange = (field, value) => {
+    setEditedInfo(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleSave = async () => {
+    try {
+      setLoading(true);
+      const db = getFirestore();
+      const userRef = doc(db, "users", userId);
+      
+      await updateDoc(userRef, {
+        name: editedInfo.name,
+        email: editedInfo.email,
+        phoneNumber: editedInfo.phoneNumber
+      });
+      
+      // Update local state
+      setProfileInfo(prev => ({
+        ...prev,
+        name: editedInfo.name,
+        email: editedInfo.email,
+        phoneNumber: editedInfo.phoneNumber
+      }));
+      
+      setUserName(editedInfo.name);
+      setIsEditing(false);
+      setLoading(false);
+      
+      // Update Redux store
+      dispatch(setUserInfo({
+        uid: userId,
+        name: editedInfo.name,
+        email: editedInfo.email,
+        phoneNumber: editedInfo.phoneNumber,
+        role: profileInfo.role,
+        userStatus: profileInfo.userStatus,
+        message: profileInfo.message
+      }));
+      
+    } catch (error) {
+      console.error("Error updating user data:", error);
+      setLoading(false);
+    }
+  };
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator size="large" color="#0000ff" />
-      </View>
+      <SafeAreaView style={styles.container}>
+        <ActivityIndicator size="large" color="#F70000" />
+      </SafeAreaView>
     );
   }
 
   return (
-    <NavigationContainer >
-      <Stack.Navigator>
-    <Stack.Screen name="SplashScreen" component={SplashScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="AuthLoadingScreen" component={AuthLoadingScreen} />
-    <Stack.Screen name="RoleScreen" component={RoleScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="DriversList" component={DriversListScreen} />
-    <Stack.Screen name="AmbulancesList" component={AmbulancesListScreen} />
-    <Stack.Screen name="RegistrationScreen" component={RegistrationScreen} />
-    <Stack.Screen name="OwnerTabNavigator" component={OwnerTabNavigator} options={{ headerShown: false }} />
-    <Stack.Screen name="OwnerHomeScreen" component={OwnerHomeScreen} />
-    <Stack.Screen name="DestinationSearch" component={DestinationSearch} />
-    <Stack.Screen name="OTPScreen" component={OTPScreen} />
-    <Stack.Screen name="ProfileScreen" component={ProfileScreen} />
-    <Stack.Screen name="BusinessProfileScreen" component={BusinessProfileScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="AssignAmbulanceScreen" component={AssignAmbulanceScreen} />
-    <Stack.Screen name="AddDriverScreen" component={AddDriverScreen} />
-    <Stack.Screen name="AddAmbulanceScreen" component={AddAmbulanceScreen} />
-    <Stack.Screen name="BusinessRegistrationScreen" component={BusinessRegistrationScreen} />
-    <Stack.Screen name="OwnerDashboardScreen" component={OwnerDashboardScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="HomeScreen" component={DrawerNavigator} options={{ headerShown: false }} />
-    <Stack.Screen name="SearchResults" component={SearchResults} options={{ headerShown: false }} />
-    <Stack.Screen name="OrderScreen" component={OrderScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="DriverLoginScreen" component={DriverLoginScreen} />
-    <Stack.Screen name="DriverHomeScreen" component={DriverHomeScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="DHomeScreen" component={DHomeScreen} />
-    <Stack.Screen name="NewOrderPopup" component={NewOrderPopup} options={{ headerShown: false }} />
-    <Stack.Screen name="DriverTrack" component={DriverTrack} options={{ headerShown: false }} />
-    <Stack.Screen name="UserTrack" component={UserTrack} options={{ headerShown: false }} />
-  </Stack.Navigator>
-    </NavigationContainer>
-  );
-};
-
-export default AppNavigation;
-import React, { useCallback } from "react";
-import { View, Dimensions, TouchableOpacity, StyleSheet } from "react-native";
-import Ionicons from "react-native-vector-icons/Ionicons";
-import HomeMap from "../../../components/user/HomeMap";
-import InitialMessage from "../../../components/user/InitialMessage";
-import HomeSearch from "../../../components/user/HomeSearch";
-import Logout from "../../../components/owner/Logout";
-import Profile from "../../../components/user/Profile"; // Profile component
-
-const HomeScreen = ({ navigation }) => {
-  // Prevent unnecessary re-renders
-  const openDrawer = useCallback(() => {
-    navigation.openDrawer();
-  }, [navigation]);
-
-  return (
-    <View style={styles.container}>
-      {/* Sidebar Menu Button */}
-      <TouchableOpacity style={styles.menuButton} onPress={openDrawer}>
+    <SafeAreaView style={styles.container}>
+      {/* Menu Button */}
+      <TouchableOpacity 
+        style={styles.menuButton} 
+        onPress={toggleMenu}
+      >
         <Ionicons name="menu" size={30} color="black" />
       </TouchableOpacity>
 
-      {/* Map Section */}
-      <View style={styles.mapContainer}>
-        <HomeMap />
+      {/* Profile Menu Modal - Now sliding from left */}
+      <Modal
+        visible={menuVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={toggleMenu}
+      >
+        <View style={styles.modalOverlay} onPress={toggleMenu}>
+          <View style={styles.modalContainer}>
+            {/* Close button at top right */}
+            <TouchableOpacity 
+              style={styles.closeButton} 
+              onPress={toggleMenu}
+            >
+              <Ionicons name="close" size={24} color="#F70000" />
+            </TouchableOpacity>
+            
+            <Text style={styles.modalTitle}>Profile Information</Text>
+            
+            {profileInfo && (
+              <View style={styles.profileInfoContainer}>
+                {isEditing ? (
+                  <>
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Name:</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editedInfo.name}
+                        onChangeText={(text) => handleInputChange('name', text)}
+                      />
+                    </View>
+                    
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Email:</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editedInfo.email}
+                        onChangeText={(text) => handleInputChange('email', text)}
+                        keyboardType="email-address"
+                      />
+                    </View>
+                    
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Phone:</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editedInfo.phoneNumber}
+                        onChangeText={(text) => handleInputChange('phoneNumber', text)}
+                        keyboardType="phone-pad"
+                      />
+                    </View>
+                    
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Role:</Text>
+                      <Text style={styles.nonEditableField}>{profileInfo.role}</Text>
+                    </View>
+                    
+                    <TouchableOpacity 
+                      style={styles.saveButton} 
+                      onPress={handleSave}
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <ActivityIndicator size="small" color="#FFF" />
+                      ) : (
+                        <Text style={styles.saveButtonText}>Save Changes</Text>
+                      )}
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                      style={styles.cancelButton} 
+                      onPress={() => setIsEditing(false)}
+                    >
+                      <Text style={styles.cancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Name:</Text>
+                      <Text style={styles.infoText}>{profileInfo.name}</Text>
+                    </View>
+                    
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Email:</Text>
+                      <Text style={styles.infoText}>{profileInfo.email}</Text>
+                    </View>
+                    
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Phone:</Text>
+                      <Text style={styles.infoText}>{profileInfo.phoneNumber}</Text>
+                    </View>
+                    
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Role:</Text>
+                      <Text style={styles.infoText}>{profileInfo.role}</Text>
+                    </View>
+                    
+                    <TouchableOpacity 
+                      style={styles.editButton} 
+                      onPress={handleEdit}
+                    >
+                      <Text style={styles.editButtonText}>Edit Profile</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Header with Gradient */}
+      <View>
+        <LinearGradient colors={['#F70000', '#D60000']} style={styles.header}>
+          <Text style={styles.headerTitle}>Owner Home</Text>
+        </LinearGradient>
       </View>
 
-      {/* Bottom UI Elements */}
-      <View style={styles.bottomContainer}>
-        <Logout navigation={navigation} />
-        <InitialMessage />
-        <HomeSearch />
+      <View style={styles.mainContent}>
+        <Text style={styles.welcomeText}>Welcome, {userName || 'Owner'}</Text>
+
+        <View style={styles.gridContainer}>
+          <TouchableOpacity
+            style={styles.gridItem}
+            onPress={() => navigation.navigate('AddDriverScreen')}
+          >
+            <Icon name="account-plus" size={50} color="#F70000" />
+            <Text style={styles.gridText}>Add Driver</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.gridItem}
+            onPress={() => navigation.navigate('AddAmbulanceScreen')}
+          >
+            <Icon name="ambulance" size={50} color="#F70000" />
+            <Text style={styles.gridText}>Add Ambulance</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.gridItem}
+            onPress={() => navigation.navigate('AssignAmbulanceScreen')}
+          >
+            <Icon name="account-convert" size={50} color="#F70000" />
+            <Text style={styles.gridText}>Assign Ambulance</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#FFF',
   },
   menuButton: {
     position: "absolute",
@@ -212,1597 +1068,35 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 5,
   },
-  mapContainer: {
-    height: Dimensions.get("window").height - 400,
-  },
-  bottomContainer: {
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-  },
-  profileContainer: {
-    marginTop: 10, // Adds spacing between HomeSearch and Profile
-    alignItems: "center",
-  },
-});
-
-export default HomeScreen;
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  View, 
-  Dimensions, 
-  Alert, 
-  ScrollView, 
-  Text, 
-  StyleSheet, 
-  Image, 
-  Pressable, 
-  Animated, 
-  ActivityIndicator 
-} from 'react-native';
-import { useRoute, useNavigation } from '@react-navigation/native';
-import firestore from '@react-native-firebase/firestore';
-import auth from '@react-native-firebase/auth';
-import storage from '@react-native-firebase/storage';
-import haversine from 'haversine-distance';
-import Geocoding from 'react-native-geocoding';
-import Ionicons from 'react-native-vector-icons/Ionicons';
-import { useDispatch } from 'react-redux';
-import { setOrderData } from '../../../redux/orderSlice';
-import typesData from '../../../assets/data/types';
-import MapView, { PROVIDER_GOOGLE, Marker } from 'react-native-maps';
-import MapViewDirections from 'react-native-maps-directions';
-
-// Initialize Geocoding with your API key
-Geocoding.init('AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM');
-const GOOGLE_MAPS_APIKEY = 'AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM';
-const { width, height } = Dimensions.get('window');
-
-const SearchResults = () => {
-  const [type, setType] = useState(null);
-  const [userData, setUserData] = useState(null);
-  const [distance, setDistance] = useState(null);
-  const [duration, setDuration] = useState(null);
-  const [originName, setOriginName] = useState('');
-  const [destinationName, setDestinationName] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [routeError, setRouteError] = useState(null);
-
-  const route = useRoute();
-  const navigation = useNavigation();
-  const dispatch = useDispatch();
-  const animatedButtonScale = useRef(new Animated.Value(1)).current;
-
-  // Destructure origin & destination details from route params
-  const { originPlace, destinationPlace } = route.params;
-  const origin = originPlace.details.geometry.location;
-  const destination = destinationPlace.details.geometry.location;
-
-  useEffect(() => {
-    const initializeScreen = async () => {
-      try {
-        console.log("Initializing SearchResults Screen...");
-        console.log("Route Params:", route.params);
-
-        if (!origin || !destination) {
-          const errorMessage = 'Origin or destination is missing.';
-          console.error(errorMessage);
-          Alert.alert('Error', errorMessage);
-          setLoading(false);
-          return;
-        }
-
-        // Fetch formatted addresses for origin and destination
-        console.log("Fetching formatted addresses...");
-        const [originRes, destinationRes] = await Promise.all([
-          Geocoding.from(origin.lat, origin.lng),
-          Geocoding.from(destination.lat, destination.lng)
-        ]);
-        
-        console.log("Origin Geocoding Result:", originRes);
-        console.log("Destination Geocoding Result:", destinationRes);
-
-        setOriginName(originRes.results[0]?.formatted_address || 'Unknown Location');
-        setDestinationName(destinationRes.results[0]?.formatted_address || 'Unknown Location');
-
-        // Get the current user's data
-        console.log("Fetching user data...");
-        const user = auth().currentUser;
-        if (!user) {
-          const errorMessage = 'User not authenticated.';
-          console.error(errorMessage);
-          Alert.alert('Error', errorMessage);
-          setLoading(false);
-          navigation.goBack();
-          return;
-        }
-        
-        const userDoc = await firestore().collection('users').doc(user.uid).get();
-        if (!userDoc.exists) {
-          const errorMessage = 'User data not found.';
-          console.error(errorMessage);
-          Alert.alert('Error', errorMessage);
-          setLoading(false);
-          navigation.goBack();
-          return;
-        }
-        
-        console.log("User Data:", userDoc.data());
-        setUserData(userDoc.data());
-        setLoading(false);
-      } catch (error) {
-        console.error("Error during initialization:", error);
-        Alert.alert('Error', `An error occurred: ${error.message}`);
-        setLoading(false);
-        navigation.goBack();
-      }
-    };
-
-    initializeScreen();
-  }, [navigation, origin, destination, route.params]);
-
-  // Animate the book button when pressed
-  const handlePressIn = () => {
-    Animated.spring(animatedButtonScale, {
-      toValue: 0.96,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const handlePressOut = () => {
-    Animated.spring(animatedButtonScale, {
-      toValue: 1,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const calculatePrice = (baseRate) => {
-    if (!distance || !baseRate) return 0;
-    return parseFloat((baseRate * distance).toFixed(2));
-  };
-  const handleBookRide = async () => {
-    if (!type) {
-      Alert.alert('Select Vehicle', 'Please choose a vehicle type to continue');
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      console.log("Booking ride...");
-      const user = auth().currentUser;
-      const selectedType = typesData.find((t) => t.type === type);
-      
-      // Create order data. If desired, you can also create a sub-collection (e.g., tracking) later.
-      const orderData = {
-        user: {
-          id: user.uid,
-          name: userData.name,
-          phone: userData.phoneNumber,
-        },
-        route: {
-          origin: { ...origin, name: originName },
-          destination: { ...destination, name: destinationName },
-          distance: distance ?? 0,    
-          duration: duration ?? 0,    
-        },
-        vehicle: {
-          type: selectedType.type,
-          price: calculatePrice(selectedType.baseRatePerKm),
-        },
-        status: 'pending',
-        createdAt: firestore.FieldValue.serverTimestamp(),
-      };
-      console.log("Order Data:", orderData);
-      // Create the order in the unified "orders" collection.
-      const orderRef = await firestore().collection('orders').add(orderData);
-      console.log("Order Reference:", orderRef);
-      dispatch(setOrderData({
-        orderId: orderRef.id,
-        ...orderData,
-        createdAt: new Date().toISOString(),
-      }));
-
-      navigation.navigate('OrderScreen', {
-        id: orderRef.id,
-        originPlace,
-        destinationPlace,
-        originName,
-        destinationName,
-        distance, // Pass distance
-        price: orderData.vehicle.price,        // Pass price correctly
-      });
-      
-    } catch (error) {
-      console.error('Order Creation Error:', error);
-      Alert.alert('Order Error', `Failed to create order: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-    
-  // Return an image based on the vehicle type (using the first word)
-  const getVehicleImage = (type) => {
-    const images = {
-      Haice: require('../../../assets/images/a1.png'),
-      Every: require('../../../assets/images/a2.png'),
-      default: require('../../../assets/images/a3.png'),
-    };
-    const key = type.split(' ')[0];
-    return images[key] || images.default;
-  };
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#e74c3c" />
-        <Text style={styles.loadingText}>Preparing Your Ride Options...</Text>
-      </View>
-    );
-  }
-
-  const originCoords = {
-    latitude: origin.lat,
-    longitude: origin.lng,
-  };
-  
-  const destinationCoords = {
-    latitude: destination.lat,
-    longitude: destination.lng,
-  };
-
-  return (
-    <View style={styles.container}>
-      {/* Map Section */}
-      <View style={styles.mapContainer}>
-        <MapView
-          style={styles.map}
-          provider={PROVIDER_GOOGLE}
-          initialRegion={{
-            latitude: (origin.lat + destination.lat) / 2,
-            longitude: (origin.lng + destination.lng) / 2,
-            latitudeDelta: Math.abs(origin.lat - destination.lat) * 2, // Increased delta for zoom out
-            longitudeDelta: Math.abs(origin.lng - destination.lng) * 2, // Increased delta for zoom out
-          }}
-          mapPadding={{ top: 0, right: 0, bottom: height * 0.4, left: 0 }}
-        >
-          <MapViewDirections
-            origin={originCoords}
-            destination={destinationCoords}
-            apikey={GOOGLE_MAPS_APIKEY}
-            strokeWidth={4}
-            strokeColor="#e74c3c"  // Red route line
-            precision="high"
-            onReady={(result) => {
-              console.log("MapViewDirections onReady:", result);
-              if (result.distance === 0 || result.duration === 0) {
-                const errorMessage = 'No route found between these locations';
-                setRouteError(errorMessage);
-                console.error(errorMessage);
-                return;
-              }
-              setDistance(result.distance);
-              setDuration(result.duration);
-            }}
-            onError={(errorMessage) => {
-              console.error('Directions error:', errorMessage);
-              setRouteError('Could not calculate route. Please check locations');
-            }}
-          />
-
-          {/* Error Banner */}
-          {routeError && (
-            <View style={[styles.errorBanner, { backgroundColor: '#e74c3c' }]}>
-              <Ionicons name="warning" size={20} color="#fff" />
-              <Text style={styles.errorText}>{routeError}</Text>
-            </View>
-          )}
-
-          {/* Origin Marker */}
-          <Marker coordinate={originCoords}>
-            <View style={[styles.markerBubble, { backgroundColor: '#e74c3c' }]}>
-              <Ionicons name="location" size={20} color="#fff" />
-              <View style={[styles.markerArrow, { backgroundColor: '#e74c3c' }]} />
-            </View>
-          </Marker>
-
-          {/* Destination Marker */}
-          <Marker coordinate={destinationCoords}>
-            <View style={[styles.markerBubble, { backgroundColor: '#e74c3c' }]}>
-              <Ionicons name="flag" size={18} color="#fff" />
-              <View style={[styles.markerArrow, { backgroundColor: '#e74c3c' }]} />
-            </View>
-          </Marker>
-        </MapView>
-
-        {/* Route Info Card */}
-        <View style={styles.routeInfoCard}>
-          <View style={styles.infoItem}>
-            <Ionicons name="speedometer" size={18} color="#e74c3c" />
-            <Text style={styles.infoText}>
-              {distance ? `${distance.toFixed(1)} km` : '--'}
-            </Text>
-          </View>
-          
-          <View style={styles.infoDivider} />
-          
-          <View style={styles.infoItem}>
-            <Ionicons name="time" size={18} color="#e74c3c" />
-            <Text style={styles.infoText}>
-              {duration ? `${Math.round(duration)} mins` : '--'}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Ride Selection */}
-      <ScrollView 
-        contentContainerStyle={styles.scrollContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Locations Card */}
-        <View style={styles.locationsCard}>
-          <View style={styles.locationRow}>
-            <View style={[styles.locationDot, { backgroundColor: '#e74c3c' }]} />
-            <View style={styles.locationTexts}>
-              <Text style={styles.locationLabel}>Pickup Location</Text>
-              <Text style={styles.locationValue} numberOfLines={2}>
-                {originName}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.locationRow}>
-            <View style={[styles.locationDot, { backgroundColor: '#e74c3c' }]} />
-            <View style={styles.locationTexts}>
-              <Text style={styles.locationLabel}>Drop-off Location</Text>
-              <Text style={styles.locationValue} numberOfLines={2}>
-                {destinationName}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Vehicle Options */}
-        <Text style={styles.sectionTitle}>Select Vehicle Type</Text>
-        
-        {typesData.map((vehicle) => (
-          <Pressable
-            key={vehicle.id}
-            onPress={() => {
-                console.log(`Vehicle type selected: ${vehicle.type}`);
-                setType(vehicle.type)
-              }
-            }
-            style={({ pressed }) => [
-              styles.vehicleCard,
-              type === vehicle.type && styles.selectedVehicleCard,
-              { opacity: pressed ? 0.9 : 1 }
-            ]}
-          >
-            <Image
-              source={getVehicleImage(vehicle.type)}
-              style={styles.vehicleImage}
-            />
-            
-            <View style={styles.vehicleInfo}>
-              <Text style={styles.vehicleTitle}>{vehicle.type}</Text>
-              <View style={styles.metaContainer}>
-                <Text style={styles.metaText}>
-                  <Ionicons name="people" size={14} /> {vehicle.capacity}
-                </Text>
-                <Text style={styles.metaText}>
-                  <Ionicons name="briefcase" size={14} /> {vehicle.luggage}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.priceTag}>
-              <Text style={styles.priceText}>Rs {calculatePrice(vehicle.baseRatePerKm)}</Text>
-            </View>
-
-            {type === vehicle.type && (
-              <View style={styles.selectedBadge}>
-                <Ionicons name="checkmark-circle" size={20} color="#fff" />
-              </View>
-            )}
-          </Pressable>
-        ))}
-      </ScrollView>
-
-      {/* Book Button */}
-      <Animated.View 
-        style={[
-          styles.bookButtonContainer,
-          { transform: [{ scale: animatedButtonScale }] }
-        ]}
-      >
-        <Pressable
-          onPress={handleBookRide}
-          onPressIn={handlePressIn}
-          onPressOut={handlePressOut}
-          style={styles.bookButton}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <Text style={styles.bookButtonText}>Confirm Ride</Text>
-              <Ionicons name="arrow-forward" size={20} color="#fff" />
-            </>
-          )}
-        </Pressable>
-      </Animated.View>
-    </View>
-  );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',  // White background
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#2c3e50',
-    fontFamily: 'Inter-Medium',
-  },
-  mapContainer: {
-    height: height * 0.60,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    overflow: 'hidden',
-  },
-  map: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  markerBubble: {
-    backgroundColor: '#e74c3c',  // Red marker bubble
-    padding: 12,
-    borderRadius: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  markerArrow: {
-    position: 'absolute',
-    bottom: -8,
-    width: 16,
-    height: 16,
-    transform: [{ rotate: '45deg' }],
-    borderRadius: 2,
-  },
-  routeInfoCard: {
-    position: 'absolute',
-    bottom: 16,
-    left: 16,
-    right: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  infoItem: {
-    alignItems: 'center',
-    flexDirection: 'row',
-  },
-  infoText: {
-    fontSize: 16,
-    fontFamily: 'Inter-SemiBold',
-    color: '#2c3e50',
-    marginLeft: 8,
-  },
-  infoDivider: {
-    width: 1,
-    height: '100%',
-    backgroundColor: '#e0e0e0',
-    marginHorizontal: 12,
-  },
-  scrollContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 100,
-  },
-  locationsCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  locationDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  locationTexts: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  locationLabel: {
-    fontSize: 14,
-    color: '#95a5a6',
-    fontFamily: 'Inter-Medium',
-    marginBottom: 4,
-  },
-  locationValue: {
-    fontSize: 16,
-    color: '#2c3e50',
-    fontFamily: 'Inter-SemiBold',
-    lineHeight: 22,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#ecf0f1',
-    marginVertical: 12,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    color: '#2c3e50',
-    fontFamily: 'Inter-Bold',
-    marginBottom: 16,
-  },
-  vehicleCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  errorBanner: {
-    backgroundColor: '#e74c3c',  // Red error banner
-    padding: 12,
-    margin: 16,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  errorText: {
-    color: '#fff',
-    fontFamily: 'Inter-Medium',
-    marginLeft: 8,
-  },
-  selectedVehicleCard: {
-    borderWidth: 2,
-    borderColor: '#e74c3c',  // Red selected border
-    backgroundColor: '#f8fbff',
-  },
-  vehicleImage: {
-    width: 80,
-    height: 60,
-    resizeMode: 'contain',
-  },
-  vehicleInfo: {
-    flex: 1,
-    marginHorizontal: 16,
-  },
-  vehicleTitle: {
-    fontSize: 16,
-    color: '#2c3e50',
-    fontFamily: 'Inter-Bold',
-    marginBottom: 8,
-  },
-  metaContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  metaText: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    fontFamily: 'Inter-Medium',
-    marginRight: 12,
-  },
-  priceTag: {
-    backgroundColor: '#e74c3c',  // Red price tag
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  priceText: {
-    fontSize: 16,
-    color: '#fff',
-    fontFamily: 'Inter-Bold',
-  },
-  selectedBadge: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#e74c3c',  // Red selected badge
-    borderRadius: 12,
-    padding: 4,
-  },
-  bookButtonContainer: {
-    position: 'absolute',
-    bottom: 24,
-    left: 16,
-    right: 16,
-  },
-  bookButton: {
-    backgroundColor: '#e74c3c',  // Red book button
-    borderRadius: 14,
-    padding: 18,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  bookButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontFamily: 'Inter-Bold',
-  },
-});
-
-export default SearchResults;
-import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  Dimensions, 
-  TouchableOpacity, 
-  Alert, 
-  StyleSheet, 
-  ActivityIndicator, 
-  ScrollView 
-} from 'react-native';
-import { useRoute, useNavigation } from '@react-navigation/native';
-import firestore from '@react-native-firebase/firestore';
-import OrderMap from '../../../components/user/OrderMap';
-
-const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371; // Earth radius in km
-  const dLat = (lat2 - lat1) * (Math.PI / 180);
-  const dLon = (lon2 - lon1) * (Math.PI / 180);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * (Math.PI / 180)) *
-    Math.cos(lat2 * (Math.PI / 180)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
-
-const OrderScreen = () => {
-  const [order, setOrder] = useState(null);
-  const [drivers, setDrivers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const route = useRoute();
-  const navigation = useNavigation();
-
-  const { id, originPlace, destinationPlace, originName, destinationName, distance, price } = route.params;
-
-  // Extract and validate origin coordinates
-  const originLatitude = originPlace?.details?.geometry?.location?.lat;
-  const originLongitude = originPlace?.details?.geometry?.location?.lng;
-  const origin = { latitude: originLatitude, longitude: originLongitude };
-
-  // Extract destination coordinates
-  const destinationLatitude = destinationPlace?.details?.geometry?.location?.lat;
-  const destinationLongitude = destinationPlace?.details?.geometry?.location?.lng;
-  const destination = { latitude: destinationLatitude, longitude: destinationLongitude };
-
-  // Listen to the order document for real-time updates.
-  useEffect(() => {
-    const unsubscribeOrder = firestore()
-      .collection('orders')
-      .doc(id)
-      .onSnapshot(doc => {
-        if (doc.exists) {
-          const data = doc.data();
-          setOrder(data);
-          // Navigate to UserTrack if the order is accepted.
-          if (data.status === 'Accepted') {
-            navigation.navigate('UserTrack', { orderId: id });
-          }
-        }
-        setLoading(false);
-      }, error => {
-        console.error('Error fetching order:', error);
-        setLoading(false);
-      });
-    
-    return () => unsubscribeOrder();
-  }, [id, navigation]);
-
-  // Fetch nearby drivers (ambulances) within a 7 km radius.
-  useEffect(() => {
-    if (!origin.latitude || !origin.longitude) {
-      console.warn('Origin coordinates are missing');
-      return;
-    }
-
-    const unsubscribeDrivers = firestore()
-      .collection('onDuty')
-      .where('status', '==', 'Online')
-      .onSnapshot(snapshot => {
-        const driversData = [];
-        snapshot.forEach(doc => {
-          const driver = doc.data();
-          if (driver.latitude && driver.longitude) {
-            const distanceCalc = calculateDistance(
-              origin.latitude,
-              origin.longitude,
-              driver.latitude,
-              driver.longitude
-            );
-            // Debug log to help determine the computed distance.
-            console.log(`Driver ${driver.ambulanceRegNo}: ${distanceCalc.toFixed(2)} km away`);
-
-            if (distanceCalc <= 7) {
-              driversData.push({
-                ...driver,
-                id: doc.id,
-                distance: distanceCalc.toFixed(2)
-              });
-            }
-          }
-        });
-        setDrivers(driversData);
-      }, error => {
-        console.error('Error fetching drivers:', error);
-      });
-
-    return () => unsubscribeDrivers();
-  }, [origin.latitude, origin.longitude]);
-
-  // Confirm cancellation using an alert dialog.
-  const confirmCancelOrder = () => {
-    Alert.alert(
-      'Cancel Booking',
-      'Are you sure you want to cancel your booking?',
-      [
-        { text: 'No', style: 'cancel' },
-        { 
-          text: 'Yes', 
-          onPress: async () => {
-            try {
-              await firestore().collection('orders').doc(id).delete();
-              Alert.alert('Booking Cancelled', 'Your booking has been cancelled.');
-              navigation.navigate('HomeScreen');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to cancel the booking.');
-            }
-          } 
-        },
-      ],
-      { cancelable: true }
-    );
-  };
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Loading order details...</Text>
-      </View>
-    );
-  }
-
-  return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      {/* Map Section */}
-      <View style={styles.mapContainer}>
-        <OrderMap origin={origin} destination={destination} drivers={drivers} />
-      </View>
-
-      {/* Order Details Section */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Order Details</Text>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Status:</Text>
-          <Text style={styles.detailValue}>{order?.status || 'Loading...'}</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Price:</Text>
-          <Text style={styles.detailValue}>Rs {price}</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Distance:</Text>
-          <Text style={styles.detailValue}>{distance} km</Text>
-        </View>
-      </View>
-
-      {/* Location Details Section */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Location Details</Text>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Pickup:</Text>
-          <Text style={styles.detailValue}>{originName || 'Loading...'}</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Drop-off:</Text>
-          <Text style={styles.detailValue}>{destinationName || 'Loading...'}</Text>
-        </View>
-      </View>
-
-      {/* Nearby Drivers Section */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Available Ambulances (7km)</Text>
-        {drivers.length === 0 ? (
-          <Text style={styles.noDriversText}>No ambulances available in your area</Text>
-        ) : (
-          drivers.map(driver => (
-            <View key={driver.ambulanceRegNo} style={styles.driverCard}>
-              <Text style={styles.driverName}>{driver.name}</Text>
-              <Text style={styles.driverDetail}>Reg: {driver.ambulanceRegNo}</Text>
-              <Text style={styles.driverDetail}>Distance: {driver.distance} km</Text>
-              <Text style={styles.driverDetail}>Contact: {driver.phone}</Text>
-            </View>
-          ))
-        )}
-      </View>
-
-      {/* Cancel Button */}
-      <TouchableOpacity style={styles.cancelButton} onPress={confirmCancelOrder}>
-        <Text style={styles.cancelButtonText}>Cancel Booking</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
-};
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F5F5' },
-  scrollContent: { paddingBottom: 20 },
-  loadingContainer: {
-    flex: 1, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    backgroundColor: '#F5F5F5'
-  },
-  loadingText: { marginTop: 10, fontSize: 16, color: '#333' },
-  mapContainer: {
-    height: Dimensions.get('window').height * 0.4, 
-    backgroundColor: '#E0E0E0'
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    marginHorizontal: 15,
-    marginVertical: 10,
+  header: {
     padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-    overflow: 'hidden'
-  },
-  sectionTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', marginBottom: 15 },
-  detailRow: {
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    marginBottom: 10
-  },
-  detailLabel: { fontSize: 14, color: '#666', flex: 1, textAlign: 'left' },
-  detailValue: { fontSize: 14, color: '#333', fontWeight: '500', flex: 1, textAlign: 'right' },
-  driverCard: {
-    backgroundColor: '#F9F9F9', 
-    borderRadius: 8, 
-    padding: 10, 
-    marginBottom: 10
-  },
-  driverName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  driverDetail: { fontSize: 14, color: '#666', marginTop: 4 },
-  noDriversText: {
-    fontSize: 14, 
-    color: '#666', 
-    fontStyle: 'italic', 
-    textAlign: 'center'
-  },
-  cancelButton: {
-    backgroundColor: '#FF4444', 
-    borderRadius: 10, 
-    padding: 15,
-    marginHorizontal: 15, 
-    marginTop: 10, 
-    alignItems: 'center'
-  },
-  cancelButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' }
-});
-
-export default OrderScreen;
-import React, { useEffect, useState, useRef } from "react";
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions } from "react-native";
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
-import MapViewDirections from "react-native-maps-directions";
-import firestore from "@react-native-firebase/firestore";
-
-const GOOGLE_MAPS_APIKEY = 'AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM'; // Replace with your actual API key
-
-const UserTrack = ({ route }) => {
-  const { orderId } = route.params;
-  const [currentLocation, setCurrentLocation] = useState(null);
-  const [origin, setOrigin] = useState(null);
-  const [destination, setDestination] = useState(null);
-  const [rideStatus, setRideStatus] = useState("Accepted");
-  const [orderData, setOrderData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const mapRef = useRef(null);
-
-  useEffect(() => {
-    const unsubscribe = firestore()
-      .collection('orders')
-      .doc(orderId)
-      .onSnapshot(
-        (doc) => {
-          if (doc.exists) {
-            const data = doc.data();
-            console.log("Order Data:", data);
-
-            // Log full data for debugging
-            console.log("Full order data:", JSON.stringify(data));
-
-            // Update driver's current location
-            if (data.driverLocation?.latitude && data.driverLocation?.longitude) {
-              setCurrentLocation(data.driverLocation);
-              console.log("Current location set:", data.driverLocation);
-            } else {
-              console.warn("driverLocation is missing or incomplete.");
-            }
-
-            // Extract origin from multiple possible paths
-            if (data.origin && data.origin.lat && data.origin.lng) {
-              const newOrigin = {
-                latitude: data.origin.lat,
-                longitude: data.origin.lng,
-                name: data.origin.name || "Pickup Location",
-              };
-              setOrigin(newOrigin);
-              console.log("Origin set from data.origin:", newOrigin);
-            } else if (data.originPlace?.details?.geometry?.location?.lat && data.originPlace?.details?.geometry?.location?.lng) {
-              const originCoords = data.originPlace.details.geometry.location;
-              const newOrigin = {
-                latitude: originCoords.lat,
-                longitude: originCoords.lng,
-                name: data.originPlace.name || "Pickup Location",
-              };
-              setOrigin(newOrigin);
-              console.log("Origin set from data.originPlace:", newOrigin);
-            } else if (data.route && data.route.origin && data.route.origin.lat && data.route.origin.lng) {
-              // Fallback: if the origin is nested under a 'route' field
-              const newOrigin = {
-                latitude: data.route.origin.lat,
-                longitude: data.route.origin.lng,
-                name: data.route.origin.name || "Pickup Location",
-              };
-              setOrigin(newOrigin);
-              console.log("Origin set from data.route.origin:", newOrigin);
-            } else {
-              console.warn("Origin data is missing.");
-            }
-
-            // Extract destination from multiple possible paths
-            if (data.destination && data.destination.lat && data.destination.lng) {
-              const newDestination = {
-                latitude: data.destination.lat,
-                longitude: data.destination.lng,
-                name: data.destination.name || "Destination",
-              };
-              setDestination(newDestination);
-              console.log("Destination set from data.destination:", newDestination);
-            } else if (data.destinationPlace?.details?.geometry?.location?.lat && data.destinationPlace?.details?.geometry?.location?.lng) {
-              const destCoords = data.destinationPlace.details.geometry.location;
-              const newDestination = {
-                latitude: destCoords.lat,
-                longitude: destCoords.lng,
-                name: data.destinationPlace.name || "Destination",
-              };
-              setDestination(newDestination);
-              console.log("Destination set from data.destinationPlace:", newDestination);
-            } else if (data.route && data.route.destination && data.route.destination.lat && data.route.destination.lng) {
-              // Fallback: if the destination is nested under a 'route' field
-              const newDestination = {
-                latitude: data.route.destination.lat,
-                longitude: data.route.destination.lng,
-                name: data.route.destination.name || "Destination",
-              };
-              setDestination(newDestination);
-              console.log("Destination set from data.route.destination:", newDestination);
-            } else {
-              console.warn("Destination data is missing.");
-            }
-
-            // Update status and order data
-            setRideStatus(data.status || "Accepted");
-            setOrderData(data);
-            console.log("Ride status set to:", data.status || "Accepted");
-            setLoading(false);
-
-            // Animate map to driver's location when updated
-            if (data.driverLocation && mapRef.current) {
-              mapRef.current.animateToRegion({
-                latitude: data.driverLocation.latitude,
-                longitude: data.driverLocation.longitude,
-                latitudeDelta: 0.05,
-                longitudeDelta: 0.05,
-              });
-              console.log("Map animated to driver's location.");
-            }
-          } else {
-            setError("No order found.");
-            console.error("No order found for orderId:", orderId);
-            setLoading(false);
-          }
-        },
-        (err) => {
-          setError("Error fetching order data: " + err.message);
-          console.error("Firestore Error:", err);
-          setLoading(false);
-        }
-      );
-
-    return () => unsubscribe();
-  }, [orderId]);
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Loading tracking data...</Text>
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.errorText}>{error}</Text>
-      </View>
-    );
-  }
-
-  // Log final state before render
-  console.log("Final state:", { currentLocation, origin, destination });
-  if (!currentLocation || !origin || !destination) {
-    console.warn("Incomplete location data", { currentLocation, origin, destination });
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.errorText}>Waiting for valid location data...</Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-      {/* Status Header */}
-      <View style={styles.statusHeader}>
-        <Text style={styles.statusText}>Ambulance Status: {rideStatus}</Text>
-      </View>
-
-      {/* Map Section */}
-      <MapView
-        ref={mapRef}
-        style={styles.map}
-        provider={PROVIDER_GOOGLE}
-        initialRegion={{
-          latitude: currentLocation.latitude,
-          longitude: currentLocation.longitude,
-          latitudeDelta: 0.05,
-          longitudeDelta: 0.05,
-        }}
-      >
-        {/* Driver Marker */}
-        <Marker
-          coordinate={currentLocation}
-          title="Ambulance Location"
-          description="Real-time location of the ambulance"
-          pinColor="#FF0000"
-        />
-
-        {/* Origin Marker */}
-        <Marker
-          coordinate={origin}
-          title={origin.name || "Pickup Location"}
-          pinColor="#007AFF"
-        />
-
-        {/* Destination Marker */}
-        <Marker
-          coordinate={destination}
-          title={destination.name || "Destination"}
-          pinColor="#34C759"
-        />
-
-        {/* Route from Ambulance to Pickup */}
-        <MapViewDirections
-          origin={currentLocation}
-          destination={origin}
-          apikey={GOOGLE_MAPS_APIKEY}
-          strokeWidth={4}
-          strokeColor="#007AFF"
-          onStart={(params) => console.log("Started routing from ambulance to pickup:", params)}
-          onReady={(result) => console.log("Route ready from ambulance to pickup:", result)}
-          onError={(err) => console.log("Route Error from ambulance to pickup:", err)}
-        />
-
-        {/* Route from Pickup to Destination */}
-        <MapViewDirections
-          origin={origin}
-          destination={destination}
-          apikey={GOOGLE_MAPS_APIKEY}
-          strokeWidth={4}
-          strokeColor="#34C759"
-          onStart={(params) => console.log("Started routing from pickup to destination:", params)}
-          onReady={(result) => console.log("Route ready from pickup to destination:", result)}
-          onError={(err) => console.log("Route Error from pickup to destination:", err)}
-        />
-      </MapView>
-
-      {/* Details Section */}
-      <ScrollView style={styles.detailsContainer}>
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Ambulance Details</Text>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Driver Name:</Text>
-            <Text style={styles.detailValue}>{orderData?.driverName || 'N/A'}</Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Vehicle Type:</Text>
-            <Text style={styles.detailValue}>
-              {orderData?.vehicle?.type || orderData?.vehicleType || 'N/A'}
-            </Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Contact:</Text>
-            <Text style={styles.detailValue}>
-              {orderData?.driverPhone || 'N/A'}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Trip Details</Text>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Pickup:</Text>
-            <Text style={styles.detailValue} numberOfLines={2}>
-              {origin.name || orderData?.originName || 'N/A'}
-            </Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Destination:</Text>
-            <Text style={styles.detailValue} numberOfLines={2}>
-              {destination.name || orderData?.destinationName || 'N/A'}
-            </Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Distance:</Text>
-            <Text style={styles.detailValue}>
-              {orderData?.distance ? `${orderData.distance} km` : 'N/A'}
-            </Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Estimated Fare:</Text>
-            <Text style={styles.detailValue}>
-              Rs {orderData?.vehicle?.price || orderData?.price || 'N/A'}
-            </Text>
-          </View>
-        </View>
-      </ScrollView>
-    </View>
-  );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F5F5F5",
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#F5F5F5",
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: "#333",
-  },
-  errorText: {
-    fontSize: 16,
-    color: "#FF4444",
-    textAlign: "center",
-    paddingHorizontal: 20,
-  },
-  statusHeader: {
-    backgroundColor: "#FFFFFF",
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEE",
-  },
-  statusText: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#333",
-    textAlign: "center",
-  },
-  map: {
-    height: Dimensions.get("window").height * 0.4,
-  },
-  detailsContainer: {
-    flex: 1,
-    padding: 15,
-  },
-  card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 15,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 15,
-  },
-  detailRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: "#666",
-    flex: 1,
-  },
-  detailValue: {
-    fontSize: 14,
-    color: "#333",
-    fontWeight: "500",
-    flex: 1,
-    textAlign: "right",
-  },
-});
-
-export default UserTrack;
-import React, { useState, useEffect } from 'react';
-import { View, SafeAreaView, Alert } from 'react-native';
-import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
-import { useNavigation } from '@react-navigation/native';
-
-import styles from './styles.js';
-import PlaceRow from './placeRow';
-
-navigator.geolocation = require('react-native-geolocation-service');
-
-const homePlace = {
-  description: 'Home',
-  geometry: { location: { lat: 33.6335, lng: 73.0699 } },
-};
-
-const workPlace = {
-  description: 'Work',
-  geometry: { location: { lat: 31.8492, lng: 79.0619 } },
-};
-
-const DestinationSearch = (props) => {
-  const [originPlace, setOriginPlace] = useState(null);
-  const [destinationPlace, setDestinationPlace] = useState(null);
-
-  const navigation = useNavigation();
-
-  const checkNavigation = () => {
-    if (originPlace && destinationPlace) {
-      if (originPlace.data.place_id === destinationPlace.data.place_id) {
-        Alert.alert('Please select different pickup and drop-off locations.');
-      } else {
-        navigation.navigate('SearchResults', {
-          originPlace,
-          destinationPlace,
-        });
-      }
-    }
-  };
-
-  // The check should be done after both origin and destination are selected.
-  useEffect(() => {
-    if (originPlace && destinationPlace) {
-      checkNavigation();
-    }
-  }, [originPlace, destinationPlace]);
-
-  return (
-    <SafeAreaView>
-      <View style={styles.container}>
-        {/* Origin Place */}
-        <GooglePlacesAutocomplete
-          placeholder="Where from?"
-          onPress={(data, details = null) => {
-            setOriginPlace({ data, details });
-          }}
-          enablePoweredByContainer={false}
-          suppressDefaultStyles
-          currentLocation={true}
-          currentLocationLabel="Current location"
-          styles={{
-            textInput: styles.textInput,
-            container: styles.autocompleteContainer,
-            listView: styles.listView,
-            separator: styles.separator,
-          }}
-          fetchDetails
-          query={{
-            key: 'AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM',
-            language: 'en',
-            components: 'country:pk',
-          }}
-          renderRow={(data) => <PlaceRow data={data} />}
-          renderDescription={(data) => data.description || data.vicinity}
-          predefinedPlaces={[homePlace, workPlace]}
-        />
-
-        {/* Destination Place */}
-        <GooglePlacesAutocomplete
-          placeholder="Where to?"
-          onPress={(data, details = null) => {
-            setDestinationPlace({ data, details });
-          }}
-          enablePoweredByContainer={false}
-          suppressDefaultStyles
-          styles={{
-            textInput: styles.textInput,
-            container: {
-              ...styles.autocompleteContainer,
-              top: 55,
-            },
-            separator: styles.separator,
-          }}
-          fetchDetails
-          query={{
-            key: 'AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM',
-            language: 'en',
-            components: 'country:pk',
-          }}
-          renderRow={(data) => <PlaceRow data={data} />}
-        />
-
-        {/* Circle near Origin input */}
-        <View style={styles.circle} />
-
-        {/* Line between dots */}
-        <View style={styles.line} />
-
-        {/* Square near Destination input */}
-        <View style={styles.square} />
-      </View>
-    </SafeAreaView>
-  );
-};
-
-export default DestinationSearch;
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Image, ActivityIndicator } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useAuth } from '../../../hooks/useAuth';
-import { navigateBasedOnRole } from '../../../utils/navigationHelpers';
-
-const SplashScreen = () => {
-  const navigation = useNavigation();
-  const { user, role, loading } = useAuth();
-
-  useEffect(() => {
-    if (!loading) {
-      if (user) {
-        navigateBasedOnRole(navigation, role, user.uid);
-      } else {
-        navigation.replace('RoleScreen');
-      }
-    }
-  }, [loading, user, role]);
-
-  return (
-    <View style={styles.container}>
-      <Image style={styles.logo} source={require('../../../../assets/images/4.png')} />
-      <Text style={styles.text}>AmbuNet</Text>
-      {loading && <ActivityIndicator size="large" color="#ffffff" style={styles.loader} />}
-    </View>
-  );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#FF030D',
-  },
-  logo: {
-    width: 100,
-    height: 100,
-    marginBottom: 20,
-  },
-  text: {
-    color: 'white',
-    fontSize: 36,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  loader: {
-    marginTop: 20,
-  },
-});
-
-export default SplashScreen;
-import React from 'react';
-import { View, ActivityIndicator } from 'react-native';
-import { useAuth } from '../../../hooks/useAuth';
-import { navigateBasedOnRole } from '../../../utils/navigationHelpers';
-
-const AuthLoadingScreen = ({ navigation }) => {
-  const { user, role, loading } = useAuth();
-
-  React.useEffect(() => {
-    if (!loading) {
-      navigateBasedOnRole(navigation, role, user?.uid);
-    }
-  }, [loading, user, role]);
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#0000ff" />
-      </View>
-    );
-  }
-
-  return null;
-};
-
-export default AuthLoadingScreen;
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useDispatch } from 'react-redux';
-import { setUserInfo } from '../../../redux/userSlice';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-
-const RoleScreen = ({ navigation }) => {
-  const dispatch = useDispatch();
-  const navigationRef = useRef(null); // Initialize the navigation ref
-  const [selectedRole, setSelectedRole] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  // Load saved role from AsyncStorage on component mount
-  useEffect(() => {
-    const loadRole = async () => {
-      try {
-        const storedRole = await AsyncStorage.getItem('userRole');
-        if (storedRole) {
-          setSelectedRole(storedRole);
-          console.log('Loaded role from AsyncStorage:', storedRole); 
-        }
-      } catch (error) {
-        console.error('Failed to load role from AsyncStorage:', error);
-      }
-    };
-
-    loadRole();
-  }, []);
-
-  
-
-  // Handle role selection
-  const handleRoleSelection = async (role) => {
-    try {
-      // Store the selected role in AsyncStorage
-      await AsyncStorage.setItem('userRole', role);
-      console.log('Saved role to AsyncStorage:', role); 
-
-      // Update Redux state with the selected role
-      dispatch(setUserInfo({ role }));
-      console.log('Role dispatched to Redux:', role); 
-
-      setSelectedRole(role); // Update local state with the selected role
-
-      // Navigate to the appropriate screen based on the selected role
-      if (role === 'User' || role === 'Owner') {
-        navigation.navigate('RegistrationScreen');
-      } else if (role === 'Driver') {
-        navigation.navigate('DriverLoginScreen');
-      }
-    } catch (error) {
-      console.error('Failed to save role to AsyncStorage:', error);
-    }
-  };
-
-  // Show loading spinner
-  if (!loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading...</Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-      <Text style={styles.headerText}>Continue as a</Text>
-      <View style={styles.gridContainer}>
-        <TouchableOpacity
-          style={[styles.gridItem, selectedRole === 'User' && styles.selectedItem]}
-          onPress={() => handleRoleSelection('User')}
-        >
-          <Icon name="account" size={50} color="#F70000" />
-          <Text style={styles.gridText}>User</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.gridItem, selectedRole === 'Driver' && styles.selectedItem]}
-          onPress={() => handleRoleSelection('Driver')}
-        >
-          <Icon name="car" size={50} color="#F70000" />
-          <Text style={styles.gridText}>Driver</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.gridItem, selectedRole === 'Owner' && styles.selectedItem]}
-          onPress={() => handleRoleSelection('Owner')}
-        >
-          <Icon name="home" size={50} color="#F70000" />
-          <Text style={styles.gridText}>Owner</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F70000',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
   },
-  headerText: {
+  headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 30,
-    color: 'white',
+    color: '#FFFFFF',
+  },
+  mainContent: {
+    flex: 1,
+    padding: 16,
+    paddingBottom: 80,
+  },
+  welcomeText: {
+    fontSize: 24,
+    marginBottom: 20,
+    color: '#333',
     textAlign: 'center',
+    fontWeight: 'bold',
   },
   gridContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-around',
-    width: '100%',
+    marginBottom: 20,
   },
   gridItem: {
     width: '45%',
@@ -1818,287 +1112,196 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
   },
-  selectedItem: {
-    borderColor: '#F70000',
-    borderWidth: 2,
-  },
   gridText: {
     marginTop: 10,
     fontSize: 16,
     color: '#333',
     fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContainer: {
+    width: '80%',
+    height: '100%',
+    backgroundColor: '#FFF',
+    padding: 20,
+  },
+  closeButton: {
+    alignSelf: 'flex-end',
+    padding: 10,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#F70000',
     textAlign: 'center',
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
+  profileInfoContainer: {
+    marginTop: 20,
   },
-  loadingText: {
-    fontSize: 18,
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEE',
+  },
+  infoLabel: {
+    fontSize: 16,
     fontWeight: 'bold',
-    color: '#F70000',
+    color: '#555',
   },
-});
-
-export default RoleScreen;
-
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, Alert, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useSelector, useDispatch } from 'react-redux';
-import firestore from '@react-native-firebase/firestore';
-import { fetchUserData, setUserInfo } from '../../../redux/userSlice';
-import { launchImageLibrary } from 'react-native-image-picker';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const ProfileScreen = ({ navigation }) => {
-  const dispatch = useDispatch();
-  const userInfo = useSelector((state) => state.user);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [ownerPhoto, setOwnerPhoto] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [role, setRole] = useState('');
-
-  // Load user data and role
-  useEffect(() => {
-    const loadUserData = async () => {
-      if (!userInfo.uid) {
-        await dispatch(fetchUserData()); // Fetch user data if UID is not present
-      }
-      const storedRole = await AsyncStorage.getItem('userRole'); // Fetch role from AsyncStorage
-      console.log("Stored role from AsyncStorage:", storedRole); // Log to verify role retrieval
-      setRole(storedRole); // Set role state
-      setLoading(false); // Set loading to false after fetching
-    };
-    loadUserData();
-  }, [dispatch, userInfo.uid]);
-
-  // Set local state with user info when userInfo changes
-  useEffect(() => {
-    if (userInfo.uid) {
-      setName(userInfo.name || '');
-      setEmail(userInfo.email || '');
-      setPhoneNumber(userInfo.phoneNumber || '');
-      setOwnerPhoto(userInfo.ownerPhoto || null);
-    }
-  }, [userInfo]);
-
-  // Handle image upload
-  const handleImageUpload = () => {
-    const options = {
-      mediaType: 'photo',
-      quality: 1,
-    };
-
-    launchImageLibrary(options, (response) => {
-      if (response.didCancel) {
-        console.log('User cancelled image picker');
-      } else if (response.errorCode) {
-        console.error('ImagePicker Error: ', response.errorCode);
-      } else {
-        const uri = response.assets[0]?.uri;
-        if (uri) {
-          setOwnerPhoto(uri);
-        }
-      }
-    });
-  };
-
-  // Save profile and navigate based on role
- // Save profile and navigate based on role
-const handleSaveProfile = async () => {
-  if (!userInfo.uid) {
-    Alert.alert('Error', 'User ID not found.');
-    return;
-  }
-
-  if (name.trim() === '' || email.trim() === '' || phoneNumber.trim() === '') {
-    Alert.alert('Validation Error', 'Please fill in all fields.');
-    return;
-  }
-
-  try {
-    // Fetch the role from AsyncStorage before saving the profile
-    const storedRole = await AsyncStorage.getItem('userRole');
-    if (!storedRole) {
-      Alert.alert('Error', 'User role not found.');
-      return;
-    }
-
-    // Save user information in Firestore including the role
-    await firestore()
-      .collection('users')
-      .doc(userInfo.uid)
-      .set({
-        name: name.trim(),
-        email: email.trim(),
-        phoneNumber: phoneNumber.trim(),
-        ownerPhoto: ownerPhoto,
-        role: storedRole, // Add role to Firestore
-      });
-
-    // Save user information in the global state (Redux)
-    dispatch(setUserInfo({ uid: userInfo.uid, name, email, phoneNumber, ownerPhoto, role: storedRole }));
-
-    // Navigate based on user role after saving profile
-    if (storedRole === 'Owner') {
-      const businessDoc = await firestore().collection('businesses').where('userId', '==', userInfo.uid).get();
-      if (!businessDoc.empty) {
-        navigation.navigate('OwnerHomeScreen'); // Navigate to owner home
-      } else {
-        // Pass only serializable data
-        navigation.navigate('BusinessRegistrationScreen', {
-          uid: userInfo.uid,
-          email: email,
-          name: name,
-          phoneNumber: phoneNumber,
-          ownerPhoto: ownerPhoto ? ownerPhoto : '', // Ensure it's a string
-        });
-      }
-    } else if (storedRole === 'User') {
-      navigation.navigate('HomeScreen'); // Navigate to user home
-    } else {
-      Alert.alert('Error', 'Unknown user role. Please contact support.');
-    }
-  } catch (error) {
-    Alert.alert('Error', `Failed to save profile information: ${error.message}`);
-  }
-};
-
-
-  // Show loading screen while fetching data
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#FC1501" />
-        <Text>Loading...</Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-      <View style={styles.content}>
-        <View style={styles.profileSection}>
-          <TouchableOpacity onPress={handleImageUpload} style={styles.imageContainer}>
-            {ownerPhoto ? (
-              <Image source={{ uri: ownerPhoto }} style={styles.imagePreview} />
-            ) : (
-              <Icon name="account-circle" size={80} color="#FC1501" style={styles.profileIcon} />
-            )}
-          </TouchableOpacity>
-          <Text style={styles.text}>Your Profile</Text>
-          <View style={{ alignItems: 'center' }}>
-            <Text style={styles.sectionTitle}>Upload Owner Photo</Text>
-          </View>
-        </View>
-
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.input}
-            placeholder="Name"
-            value={name}
-            onChangeText={setName}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            value={email}
-            keyboardType="email-address"
-            onChangeText={setEmail}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Phone Number"
-            value={phoneNumber}
-            keyboardType="phone-pad"
-            onChangeText={setPhoneNumber}
-          />
-        </View>
-
-        <TouchableOpacity onPress={handleSaveProfile} style={styles.saveButton}>
-          <Text style={styles.saveButtonText}>Save Profile</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-};
-
-const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F70000',
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  content: {
-    flex: 1,
-    padding: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  profileSection: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  imageContainer: {
-    marginBottom: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  imagePreview: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-  },
-  profileIcon: {
-    marginBottom: 10,
-  },
-  text: {
-    fontSize: 24,
-    color: 'black',
-    fontWeight: 'bold',
-  },
-  sectionTitle: {
-    fontSize: 18,
-    color: 'black',
-    marginTop: 10,
+  infoText: {
+    fontSize: 16,
+    color: '#333',
   },
   inputContainer: {
-    width: '100%',
+    marginBottom: 15,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEE',
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#555',
+    marginBottom: 5,
   },
   input: {
-    height: 50,
-    borderColor: 'black',
+    fontSize: 16,
+    color: '#333',
     borderWidth: 1,
+    borderColor: '#DDD',
     borderRadius: 5,
-    marginBottom: 15,
-    paddingHorizontal: 10,
-    color: 'black',
+    padding: 8,
+  },
+  nonEditableField: {
+    fontSize: 16,
+    color: '#333',
+    padding: 8,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 5,
+  },
+  editButton: {
+    backgroundColor: '#F70000',
+    padding: 12,
+    borderRadius: 5,
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  editButtonText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   saveButton: {
-    backgroundColor: '#f70000',
-    padding: 15,
+    backgroundColor: '#F70000',
+    padding: 12,
     borderRadius: 5,
-    width: '100%',
+    marginTop: 20,
     alignItems: 'center',
   },
   saveButtonText: {
-    fontSize: 16,
+    color: '#FFF',
     fontWeight: 'bold',
-    color: 'black',
+    fontSize: 16,
+  },
+  cancelButton: {
+    backgroundColor: '#DDD',
+    padding: 12,
+    borderRadius: 5,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#333',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });
 
-export default ProfileScreen; 
-Explain all screens code, the flow of the code,
-and the function on the screen also remember the code.
-After this, I added one functionality to tell u later. In the next prompt
+export default OwnerHomeScreen; add the functionality in the home screen like the ownerhone screen to show profile but the its show on the basis of driveridd and drivers table entity are address
+"Vdjbdsn"
+(string)
+
+
+assignedAmbulance
+"bAVCwqdHKj1fH4XYpiGk"
+(string)
+
+
+cnicBackImage
+"https://firebasestorage.googleapis.com/v0/b/bscs-74136.firebasestorage.app/o/drivers%2FBYcW4voRDtbPj58fg4uv%2FcnicBack_1745823491894.jpg?alt=media&token=a18c1ffd-cdeb-4abb-be86-7be76b259a4f"
+(string)
+
+
+cnicFrontImage
+"https://firebasestorage.googleapis.com/v0/b/bscs-74136.firebasestorage.app/o/drivers%2FBYcW4voRDtbPj58fg4uv%2FcnicFront_1745823491893.jpg?alt=media&token=13b23b0d-9c10-4778-913f-3c574d110876"
+(string)
+
+
+cnicNumber
+"1530353963841"
+(string)
+
+
+companyId
+"mJj9qIVbp5uEmKJyu7pJ"
+(string)
+
+
+createdAt
+April 28, 2025 at 11:58:22 AM UTC+5
+(timestamp)
+
+
+driverStatus
+"active"
+(string)
+
+
+email
+"Hakeemullah447@gmail.com"
+(string)
+
+
+gender
+"male"
+(string)
+
+
+licensePhoto
+"https://firebasestorage.googleapis.com/v0/b/bscs-74136.firebasestorage.app/o/drivers%2FBYcW4voRDtbPj58fg4uv%2Flicense_1745823491892.jpg?alt=media&token=fd839be6-afe4-4e43-9d4c-eb8a3a2aa738"
+(string)
+
+
+name
+"Hakeem Ullah"
+(string)
+
+
+password
+"Hakeemullah@123"
+(string)
+
+
+phoneNumber
+"03078185982"
+(string)
+
+
+profilePhoto
+"https://firebasestorage.googleapis.com/v0/b/bscs-74136.firebasestorage.app/o/drivers%2FBYcW4voRDtbPj58fg4uv%2Fprofile_1745823491890.jpg?alt=media&token=7e1acb49-976b-4ff5-a3cb-f55602593ec0"
+(string)
+
+
+requestStatus
+"Accepted"
+(string)
+
+
+Database location: nam5 other code remain the same ,add this functionality to home screen ok other functionality also present in the code of dhomescreena

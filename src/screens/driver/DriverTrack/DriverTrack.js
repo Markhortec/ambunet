@@ -347,10 +347,10 @@ const DriverTrack = ({ route, navigation }) => {
           <Text style={styles.detailText}>Pickup: {origin.name || "N/A"}</Text>
           <Text style={styles.detailText}>Destination: {destination.name || "N/A"}</Text>
           <Text style={styles.detailText}>Vehicle: {orderData.vehicle?.type || "N/A"}</Text>
-          <Text style={styles.detailText}>Base Price: ₹{orderData.vehicle?.price?.toFixed(2) || "N/A"}</Text>
+          <Text style={styles.detailText}>Base Price: Rs.{orderData.vehicle?.price?.toFixed(2) || "N/A"}</Text>
           <Text style={styles.detailText}>Applied Percentage: {orderData.pricePercentage || 18}%</Text>
           <Text style={[styles.detailText, styles.boldText]}>
-            Final Price: ₹{orderData.calculatedPrice?.toFixed(2) || 
+            Final Price: RS.{orderData.calculatedPrice?.toFixed(2) || 
               ((orderData.vehicle?.price * (orderData.pricePercentage || 18) / 100).toFixed(2))}
           </Text>
         </View>

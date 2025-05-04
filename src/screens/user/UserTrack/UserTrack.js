@@ -9,6 +9,7 @@ import {
   Alert,
 } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import useDispatch from "react-redux";
 import MapViewDirections from "react-native-maps-directions";
 import firestore from "@react-native-firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -92,7 +93,6 @@ const UserTrack = ({ route, navigation }) => {
               Alert.alert("Ride Completed", "Your ride has been completed");
               (async () => {
                 await AsyncStorage.clear();
-                dispatch(resetOrderData());
                 console.log("Order is completed");
                 navigation.goBack();
               })();

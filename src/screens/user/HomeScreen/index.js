@@ -1,26 +1,54 @@
-
-
 import React, { useCallback, useEffect, useState } from "react";
 import { View, Dimensions, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import Ionicons from "react-native-vector-icons/Ionicons";
 import HomeMap from "../../../components/user/HomeMap";
 import InitialMessage from "../../../components/user/InitialMessage";
 import HomeSearch from "../../../components/user/HomeSearch";
-import Logout from "../../../components/owner/Logout";
 import { useSelector, useDispatch } from "react-redux";
 import { getFirestore, doc, getDoc } from "@react-native-firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { setOrderData } from "../../../redux/orderSlice";
-import { resetOrderData } from "../../../redux/orderSlice";
+import { setOrderData, resetOrderData } from "../../../redux/orderSlice";
+import {  setUserInfo } from "../../../redux/userSlice";
+
+
 const HomeScreen = ({ navigation }) => {
   const orderId = useSelector((state) => state.order.orderId);
+  const userId = useSelector((state) => state.user.uid);
   const [loading, setLoading] = useState(false);
   const dispatch = useDispatch();
 
   useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        console.log("User ID from Redux state:", userId);
+        if (userId) {
+          const db = getFirestore();
+          const userRef = doc(db, "users", userId);
+          const userDoc = await getDoc(userRef);
+          // console.log("User document data:", userDoc.data());
+          const userData = userDoc.data();
+          // console.log("User data fetched:", userData);
+          dispatch(setUserInfo({
+            uid: userId,
+            name: userData.name,
+            email: userData.email,
+            phoneNumber: userData.phoneNumber, // Make sure this matches your Firestore field
+            role: userData.role,
+            userStatus: userData.userStatus,
+            message: userData.message
+          }));
+        }
+      } catch (error) {
+        console.error("Error fetching user data:", error);
+      }
+    };
+
+    fetchUserData();
+  }, [userId, dispatch]);
+
+  useEffect(() => {
     const fetchOrderIdFromStorage = async () => {
-      // await AsyncStorage.clear();
-      const storedOrderId = await AsyncStorage.getItem('orderId');
+      const storedOrderId = await AsyncStorage.getItem("orderId");
       if (storedOrderId) {
         dispatch(setOrderData(storedOrderId));
       }
@@ -31,23 +59,18 @@ const HomeScreen = ({ navigation }) => {
 
   useEffect(() => {
     const fetchOrderDetails = async () => {
-      if (!orderId) {
-        console.log("No Order ID found in Redux.");
-        return;
-      }
-  
+      if (!orderId) return;
+
       setLoading(true);
       try {
         const db = getFirestore();
         const orderRef = doc(db, "orders", orderId);
         const orderDoc = await getDoc(orderRef);
-  
+
         if (orderDoc.exists) {
           const orderData = orderDoc.data();
-          console.log("Fetched Order Details from Firestore:", orderData);
-  
+
           if (orderData.status === "Pending") {
-            // Ensure the originPlace and destinationPlace are structured correctly
             const originPlace = {
               details: {
                 geometry: {
@@ -59,7 +82,7 @@ const HomeScreen = ({ navigation }) => {
                 formatted_address: orderData.route.origin.name,
               },
             };
-  
+
             const destinationPlace = {
               details: {
                 geometry: {
@@ -71,34 +94,22 @@ const HomeScreen = ({ navigation }) => {
                 formatted_address: orderData.route.destination.name,
               },
             };
-  
-            // Log the structured data for debugging
-            // console.log("Structured Origin Place:", originPlace);
-            // console.log("Structured Destination Place:", destinationPlace);
-  
-            // Navigate to OrderScreen with the structured data
+
             navigation.navigate("OrderScreen", {
               id: orderId,
-              originPlace: originPlace, // Pass the structured originPlace
-              destinationPlace: destinationPlace, // Pass the structured destinationPlace
+              originPlace,
+              destinationPlace,
               originName: orderData.route.origin.name,
               destinationName: orderData.route.destination.name,
               distance: orderData.route.distance,
               price: orderData.vehicle.price,
             });
-          }
-          else if(orderData.status === "In Progress") {
-            // Navigate to UserTrack if the order is accepted.
+          } else if (orderData.status === "In Progress") {
             navigation.navigate("UserTrack", { orderId: orderId });
-
+          } else {
+            await AsyncStorage.removeItem("orderId");
+            dispatch(resetOrderData());
           }
-          else{
-            await AsyncStorage.clear();
-             dispatch(resetOrderData());
-            console.log("Order is already completed");
-          }
-        } else {
-          console.log("No order found with the given Order ID:", orderId);
         }
       } catch (error) {
         console.error("Error fetching order details:", error);
@@ -106,9 +117,9 @@ const HomeScreen = ({ navigation }) => {
         setLoading(false);
       }
     };
-  
+
     fetchOrderDetails();
-  }, [orderId, navigation]);
+  }, [orderId, navigation, dispatch]);
 
   const openDrawer = useCallback(() => {
     navigation.openDrawer();
@@ -116,7 +127,10 @@ const HomeScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.menuButton} onPress={openDrawer}>
+      <TouchableOpacity 
+        style={styles.menuButton} 
+        onPress={() => navigation.openDrawer()}
+      >
         <Ionicons name="menu" size={30} color="black" />
       </TouchableOpacity>
 
@@ -127,7 +141,7 @@ const HomeScreen = ({ navigation }) => {
       {loading && <ActivityIndicator size="large" color="#0000ff" />}
 
       <View style={styles.bottomContainer}>
-        <Logout navigation={navigation} />
+       
         <InitialMessage />
         <HomeSearch />
       </View>

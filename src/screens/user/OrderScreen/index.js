@@ -50,24 +50,32 @@ const OrderScreen = () => {
 
   // Listen to the order document for real-time updates.
   useEffect(() => {
+    console.log("Listening to order ID:", id); // Debug log
+  
     const unsubscribeOrder = firestore()
       .collection('orders')
       .doc(id)
-      .onSnapshot(doc => {
-        if (doc.exists) {
+      .onSnapshot((doc) => {
+        console.log("Document snapshot:", doc); // Debug log
+        
+        if (doc.exists) { // ✅ Use as boolean property
           const data = doc.data();
+          console.log("Order data:", data); // Debug log
           setOrder(data);
-          // Navigate to UserTrack if the order is accepted.
+          
           if (data.status === 'In Progress') {
             navigation.navigate('UserTrack', { orderId: id });
           }
+        } else {
+          console.warn("Order document does not exist!");
         }
+        
         setLoading(false);
-      }, error => {
+      }, (error) => {
         console.error('Error fetching order:', error);
         setLoading(false);
       });
-
+  
     return () => unsubscribeOrder();
   }, [id, navigation]);
 
