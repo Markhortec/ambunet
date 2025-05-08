@@ -48,6 +48,7 @@ const HomeScreen = ({ navigation }) => {
 
   useEffect(() => {
     const fetchOrderIdFromStorage = async () => {
+      // await AsyncStorage.clear(); // Clear AsyncStorage for testing purposes
       const storedOrderId = await AsyncStorage.getItem("orderId");
       if (storedOrderId) {
         dispatch(setOrderData(storedOrderId));

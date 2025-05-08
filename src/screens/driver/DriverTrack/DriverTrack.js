@@ -46,7 +46,8 @@ const DriverTrack = ({ route, navigation }) => {
   const [hasArrived, setHasArrived] = useState(false);
   const [distanceToOrigin, setDistanceToOrigin] = useState(null);
   const [distanceToDestination, setDistanceToDestination] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false); // Add this line
+  const [isProcessing, setIsProcessing] = useState(false);
+
   useEffect(() => {
     const unsubscribe = firestore()
       .collection("orders")
@@ -91,7 +92,6 @@ const DriverTrack = ({ route, navigation }) => {
     if (!currentLocation || !origin || !destination) return;
 
     const interval = setInterval(() => {
-      // Calculate distance to origin
       const originDistance = calculateDistance(
         currentLocation.latitude,
         currentLocation.longitude,
@@ -100,7 +100,6 @@ const DriverTrack = ({ route, navigation }) => {
       );
       setDistanceToOrigin(originDistance);
 
-      // Calculate distance to destination
       const destDistance = calculateDistance(
         currentLocation.latitude,
         currentLocation.longitude,
@@ -109,7 +108,6 @@ const DriverTrack = ({ route, navigation }) => {
       );
       setDistanceToDestination(destDistance);
 
-      // Update arrival status
       if (originDistance <= ARRIVAL_DISTANCE_THRESHOLD && !hasArrived) {
         setHasArrived(true);
       } else if (originDistance > ARRIVAL_DISTANCE_THRESHOLD) {
@@ -135,58 +133,68 @@ const DriverTrack = ({ route, navigation }) => {
   const handleCompleteRide = async () => {
     setIsProcessing(true);
     try {
-      // 1. Validate all required data exists
+      // Validate required data
       if (!currentLocation || !destination || !orderData?.ambulanceRegNo) {
-        Alert.alert(
-          "Cannot Complete Ride",
-          "System is missing required data. Please try again."
-        );
+        Alert.alert("Error", "Missing required ride data");
+        setIsProcessing(false);
         return;
       }
   
-      // 2. Calculate the final amount
+      // Calculate the transfer amount
       const amount = orderData.calculatedPrice || 
                    (orderData.vehicle?.price * (orderData.pricePercentage || 18) / 100);
   
-      // 3. Execute Firestore transaction
+      // Document references
+      const orderRef = firestore().collection("orders").doc(orderId);
+      const ambulanceRef = firestore().collection("ambulances").doc(orderData.ambulanceRegNo);
+      const earningsRef = firestore().collection("earnings").doc("8zX7cl2nm3v76i17FrJD");
+  
       await firestore().runTransaction(async (transaction) => {
-        // Get references to all documents needed
-        const orderRef = firestore().collection("orders").doc(orderId);
-        const earningsRef = firestore().collection("earnings").doc("8zX7cl2nm3v76i17FrJD");
-        const ambulanceRef = firestore().collection("ambulances").doc(orderData.ambulanceRegNo);
-        
-        // Get all documents in parallel
-        const [orderDoc, earningsDoc, ambulanceDoc] = await Promise.all([
-          transaction.get(orderRef),
-          transaction.get(earningsRef),
-          transaction.get(ambulanceRef)
+        // Get all necessary documents with error handling
+        const docs = await Promise.all([
+          transaction.get(orderRef).catch(() => undefined),
+          transaction.get(ambulanceRef).catch(() => undefined),
+          transaction.get(earningsRef).catch(() => undefined)
         ]);
   
-        // Verify ambulance exists and get company reference
-        if (!ambulanceDoc.exists) {
-          throw new Error("Ambulance record not found");
+        const [orderDoc, ambulanceDoc, earningsDoc] = docs;
+  
+        // Validate documents exist
+        if (!orderDoc || !orderDoc.exists) {
+          throw new Error("Order document not found");
         }
-        const companyId = ambulanceDoc.data().companyId;
+        if (!ambulanceDoc || !ambulanceDoc.exists) {
+          throw new Error(`Ambulance document (${orderData.ambulanceRegNo}) not found`);
+        }
+  
+        // Get company reference
+        const companyId = ambulanceDoc.data()?.companyId;
+        if (!companyId) {
+          throw new Error("Company ID not found in ambulance record");
+        }
+  
         const companyRef = firestore().collection("businesses").doc(companyId);
         const companyDoc = await transaction.get(companyRef);
-  
-        // Verify company exists and has sufficient balance
         if (!companyDoc.exists) {
           throw new Error("Company account not found");
         }
-        if ((companyDoc.data().balance || 0) < amount) {
-          throw new Error(`Company has insufficient balance (₹${companyDoc.data().balance} available)`);
+  
+        // Check company balance
+        const currentBalance = companyDoc.data()?.balance || 0;
+        if (currentBalance < amount) {
+          throw new Error(`Company has insufficient balance (Rs.${currentBalance} available)`);
         }
   
-        // Initialize earnings if empty
-        if (!earningsDoc.exists) {
+        // Initialize earnings if it doesn't exist
+        if (!earningsDoc || !earningsDoc.exists) {
           transaction.set(earningsRef, {
             balance: 0,
-            updatedAt: firestore.FieldValue.serverTimestamp()
+            updatedAt: firestore.FieldValue.serverTimestamp(),
+            createdAt: firestore.FieldValue.serverTimestamp()
           });
         }
   
-        // Perform all updates atomically
+        // Perform the financial transactions
         transaction.update(companyRef, {
           balance: firestore.FieldValue.increment(-amount),
           updatedAt: firestore.FieldValue.serverTimestamp()
@@ -209,14 +217,13 @@ const DriverTrack = ({ route, navigation }) => {
         });
       });
   
-      // 4. On success
+      // On successful completion
       Alert.alert(
         "Ride Completed",
-        "Payment processed successfully!\n" +
-        `Amount: ₹${amount.toFixed(2)}`
+        `Payment of Rs.${amount.toFixed(2)} processed successfully!`
       );
   
-      // 5. Clean up and navigate
+      // Clean up and navigate
       await AsyncStorage.removeItem('driverOrderId');
       dispatch(resetOrderData());
       navigation.navigate("DHomeScreen");
@@ -224,8 +231,8 @@ const DriverTrack = ({ route, navigation }) => {
     } catch (error) {
       console.error("Ride completion failed:", error);
       Alert.alert(
-        "Completion Error",
-        error.message || "Failed to complete ride. Please try again."
+        "Payment Error",
+        error.message || "Failed to process payment. Please try again."
       );
     } finally {
       setIsProcessing(false);

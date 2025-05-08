@@ -203,17 +203,17 @@ const OrderScreen = () => {
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Available Ambulances (7km)</Text>
         {drivers.length === 0 ? (
-          <Text style={styles.noDriversText}>No ambulances available in your area</Text>
-        ) : (
-          drivers.map(driver => (
-            <View key={driver.ambulanceRegNo} style={styles.driverCard}>
-              <Text style={styles.driverName}>{driver.name}</Text>
-              <Text style={styles.driverDetail}>Reg: {driver.ambulanceRegNo}</Text>
-              <Text style={styles.driverDetail}>Distance: {driver.distance} km</Text>
-              <Text style={styles.driverDetail}>Contact: {driver.phone}</Text>
-            </View>
-          ))
-        )}
+  <Text style={styles.noDriversText}>No ambulances available in your area</Text>
+) : (
+  drivers.map(driver => (
+    <View key={driver.id} style={styles.driverCard}>
+      <Text style={styles.driverName}>Driver Name:{driver.name}</Text>
+      <Text style={styles.driverDetail}>Distance: {driver.distance} km</Text>
+      <Text style={styles.driverDetail}>AmbulanceRegNo: {driver.ambulanceRegNo}</Text>
+      <Text style={styles.driverDetail}>Contact: {driver.phone}</Text>
+    </View>
+  ))
+)}
       </View>
 
       {/* Cancel Button */}

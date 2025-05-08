@@ -349,35 +349,39 @@ const DHomeScreen = ({ navigation }) => {
       const pricePercentage = calculatePriceBasedOnDistance(orderDistance);
       const basePrice = order.vehicle?.price || 0;
       const actualPrice = (basePrice * pricePercentage) / 100;
-
+  
       if (!checkBusinessBalance(actualPrice)) {
         throw new Error("Business doesn't have sufficient balance to cover this order");
       }
-
+  
+      // Ensure all required fields have values
+      const updateData = {
+        status: "In Progress",
+        driverName: driverData.name || "Unknown Driver",
+        driverPhone: driverData.phoneNumber || "N/A",
+        ambulanceRegNo: driverData.assignedAmbulance || "N/A",
+        driverLocation: currentLocation || { latitude: 0, longitude: 0 },
+        assignedDriverId: driverData.id || "N/A",
+        calculatedPrice: actualPrice,
+        pricePercentage: pricePercentage,
+        pricingRuleApplied: pricePercentage === 18 ? "Fixed 18% (Exceeds max distance)" : "Distance-based",
+        updatedAt: firestore.FieldValue.serverTimestamp() // Always include a timestamp
+      };
+  
       await firestore().runTransaction(async (transaction) => {
         const orderRef = firestore().collection("orders").doc(order.id);
         const orderDoc = await transaction.get(orderRef);
         
         if (orderDoc.exists && orderDoc.data().status === "Pending") {
-          transaction.update(orderRef, {
-            status: "In Progress",
-            driverName: driverData.name,
-            driverPhone: driverData.phoneNumber,
-            ambulanceRegNo: driverData.assignedAmbulance,
-            driverLocation: currentLocation,
-            assignedDriverId: driverData.id,
-            calculatedPrice: actualPrice,
-            pricePercentage: pricePercentage,
-            pricingRuleApplied: pricePercentage === 18 ? "Fixed 18% (Exceeds max distance)" : "Distance-based"
-          });
-
+          transaction.update(orderRef, updateData);
+  
           dispatch(setOrderData(order.id));
           await AsyncStorage.setItem('driverOrderId', order.id);
         } else {
           throw new Error("Order has already been accepted.");
         }
       });
-
+  
       navigation.navigate("DriverTrack", {
         orderId: order.id,
         orderDetails: {
@@ -396,10 +400,10 @@ const DHomeScreen = ({ navigation }) => {
           pricingRule: pricePercentage === 18 ? "Fixed 18% (Exceeds max distance)" : "Distance-based"
         },
         driverDetails: {
-          name: driverData.name,
-          phone: driverData.phoneNumber,
-          ambulanceRegNo: driverData.assignedAmbulance,
-          location: currentLocation,
+          name: driverData.name || "Unknown Driver",
+          phone: driverData.phoneNumber || "N/A",
+          ambulanceRegNo: driverData.assignedAmbulance || "N/A",
+          location: currentLocation || { latitude: 0, longitude: 0 },
         },
       });
       setSelectedOrder(null);
@@ -482,10 +486,7 @@ const DHomeScreen = ({ navigation }) => {
                       <Text style={styles.nonEditableField}>{driverData.driverStatus}</Text>
                     </View>
 
-                    {/* <View style={styles.inputContainer}>
-                      <Text style={styles.inputLabel}>Assigned Ambulance:</Text>
-                      <Text style={styles.nonEditableField}>{driverData.assignedAmbulance}</Text>
-                    </View> */}
+             
                     
                     <TouchableOpacity 
                       style={styles.saveButton} 
@@ -549,17 +550,14 @@ const DHomeScreen = ({ navigation }) => {
                       <Text style={styles.infoText}>{driverData.driverStatus}</Text>
                     </View>
 
-                    {/* <View style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>Assigned Ambulance:</Text>
-                      <Text style={styles.infoText}>{driverData.assignedAmbulance || 'Not assigned'}</Text>
-                    </View>
-                     */}
+                  
                     <TouchableOpacity 
                       style={styles.editButton} 
                       onPress={handleEdit}
                     >
                       <Text style={styles.editButtonText}>Edit Profile</Text>
                     </TouchableOpacity>
+                    <Logout style={{paddingTop: 3, marginTop:9}} navigation={navigation} />
                   </>
                 )}
               </ScrollView>
@@ -689,7 +687,7 @@ const DHomeScreen = ({ navigation }) => {
       >
         <Text style={styles.toggleText}>{isOnline ? "Go Offline" : "Go Online"}</Text>
       </Pressable>
-      <Logout navigation={navigation} />
+    
       <Text style={styles.balanceText}>Business Balance: Rs {businessBalance.toFixed(2)}</Text>
     </SafeAreaView>
   );
@@ -997,6 +995,7 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: 'bold',
     fontSize: 16,
+    
   },
   saveButton: {
     backgroundColor: '#F70000',
