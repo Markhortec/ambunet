@@ -104,7 +104,13 @@ const AddDriverScreen = () => {
     const isUnique = await isPhoneNumberUnique();
     if (!isUnique)
       return 'Phone number already exists. Please use a different number.';
+  if (!/^[0-9]{11}$/.test(phoneNumber))
+    return 'Phone number must be 11 digits (e.g., 03001234567).';
 
+  // New CNIC Validation (13 digits, with or without hyphens)
+  const cnicRegex = /^[0-9]{5}-?[0-9]{7}-?[0-9]{1}$/;
+  if (!cnicRegex.test(cnicNumber) || cnicNumber.replace(/-/g, '').length !== 13)
+    return 'CNIC must be 13 digits (e.g., 12345-6789012-3).';
     if (!passwordRegex.test(password))
       return 'Password must be at least 8 characters long, contain at least one number, and one special character.';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
@@ -300,21 +306,22 @@ const AddDriverScreen = () => {
           />
         ) : null}
 
-        <View style={styles.inputContainer}>
-          <Icon
-            name="card-account-details"
-            size={20}
-            color="red"
-            style={styles.iconStyle}
-          />
-          <TextInput
-            placeholder="CNIC Number"
-            value={cnicNumber}
-            onChangeText={setCnicNumber}
-            style={styles.input}
-            keyboardType="number-pad"
-          />
-        </View>
+      <View style={styles.inputContainer}>
+  <Icon
+    name="card-account-details"
+    size={20}
+    color="red"
+    style={styles.iconStyle}
+  />
+  <TextInput
+    placeholder="CNIC (e.g., 12345-6789012-3)"
+    value={cnicNumber}
+    onChangeText={setCnicNumber}
+    style={styles.input}
+    keyboardType="number-pad"
+    maxLength={15} // Allows hyphens
+  />
+</View>
 
         <Text style={styles.sectionTitle}>CNIC Front Image</Text>
         <TouchableOpacity

@@ -95,7 +95,7 @@ const OrderMap = ({ origin, destination, car, userLocation }) => {
             apikey="AIzaSyDxwhQhfS4d_Rn6D32QsiUoAVLkoXCTWmM"
             strokeWidth={4}
             strokeColor="#FF5733"
-            lineDashPattern={[1, 5]} // Dashed line effect
+            // lineDashPattern={[1, 5]} // Dashed line effect
           />
         )}
       </MapView>

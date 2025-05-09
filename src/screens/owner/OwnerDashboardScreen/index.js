@@ -104,12 +104,12 @@ const OwnerDashboardScreen = () => {
       setAssignments(combinedAssignments);
 
       // Fetch on-duty drivers
-      const dutySnapshot = await firestore()
-        .collection('duty')
-        .where('companyId', '==', businessData.companyId)
-        .get();
-      const dutyData = dutySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      setOnDutyDrivers(dutyData);
+      // const dutySnapshot = await firestore()
+      //   .collection('duty')
+      //   .where('companyId', '==', businessData.companyId)
+      //   .get();
+      // const dutyData = dutySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      // setOnDutyDrivers(dutyData);
     } catch (error) {
       console.error('Error fetching data:', error);
       Alert.alert('Error', 'Failed to fetch data. Please try again later.');
@@ -163,28 +163,28 @@ const OwnerDashboardScreen = () => {
     </LinearGradient>
   );
 
-  const renderOnDutyDriver = ({ item }) => (
-    <LinearGradient
-      colors={['#FFFFFF', '#F7F7F7']}
-      style={styles.onDutyCard}
-    >
-      <View style={styles.onDutyContent}>
-        <View style={styles.onDutyDetails}>
-          <Text style={styles.onDutyTitle}>Driver: {item.name}</Text>
-          <Text style={styles.onDutyText}>Phone: {item.phone}</Text>
-          <Text style={styles.onDutyText}>Ambulance: {item.ambulanceRegNo}</Text>
-          <Text style={styles.onDutyText}>Status: {item.status}</Text>
-        </View>
-        <View style={styles.statusIndicator}>
-          <Icon
-            name={item.status === 'Online' ? 'checkbox-marked-circle' : 'close-circle'}
-            size={24}
-            color={item.status === 'Online' ? '#4CAF50' : '#F70000'}
-          />
-        </View>
-      </View>
-    </LinearGradient>
-  );
+  // const renderOnDutyDriver = ({ item }) => (
+  //   <LinearGradient
+  //     colors={['#FFFFFF', '#F7F7F7']}
+  //     style={styles.onDutyCard}
+  //   >
+  //     <View style={styles.onDutyContent}>
+  //       <View style={styles.onDutyDetails}>
+  //         <Text style={styles.onDutyTitle}>Driver: {item.name}</Text>
+  //         <Text style={styles.onDutyText}>Phone: {item.phone}</Text>
+  //         <Text style={styles.onDutyText}>Ambulance: {item.ambulanceRegNo}</Text>
+  //         <Text style={styles.onDutyText}>Status: {item.status}</Text>
+  //       </View>
+  //       <View style={styles.statusIndicator}>
+  //         <Icon
+  //           name={item.status === 'Online' ? 'checkbox-marked-circle' : 'close-circle'}
+  //           size={24}
+  //           color={item.status === 'Online' ? '#4CAF50' : '#F70000'}
+  //         />
+  //       </View>
+  //     </View>
+  //   </LinearGradient>
+  // );
 
   const renderHeader = () => (
     <View>
@@ -206,7 +206,7 @@ const OwnerDashboardScreen = () => {
           <Text style={styles.statsLabel}>Ambulances</Text>
         </TouchableOpacity>
       </View>
-      <Text style={styles.sectionTitle}>On-Duty Drivers</Text>
+      {/* <Text style={styles.sectionTitle}>On-Duty Drivers</Text>
       <FlatList
         data={onDutyDrivers}
         renderItem={renderOnDutyDriver}
@@ -214,7 +214,7 @@ const OwnerDashboardScreen = () => {
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.onDutyList}
-      />
+      /> */}
     </View>
   );
 

@@ -4,14 +4,12 @@ import styles from "./styles";
 const InitialMessage = () => {
     return (
         <View style={styles.container}>
-            <Text style={styles.title}>Travel only if necessary</Text>
+            <Text style={styles.title}>Use Ambulance Services Responsibly</Text>
             <Text style={styles.text}>
-                Upgrading this package often requires the font files linked to your projects to be updated as well.
-                If the automatic linking works for you, running this again should update the fonts.
+                This service is intended for urgent medical needs only. Please avoid making requests unless absolutely necessary, so we can serve those in real emergencies.
             </Text>
-            <Text style={styles.learnMore}>Learn more</Text>
+            <Text style={styles.learnMore}>Learn more about when to call an ambulance</Text>
         </View>
-    )
-}
-
+    );
+};
 export default InitialMessage;

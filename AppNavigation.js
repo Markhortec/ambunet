@@ -90,20 +90,20 @@ const AppNavigation = () => {
     <Stack.Screen name="OwnerTabNavigator" component={OwnerTabNavigator} options={{ headerShown: false }} />
     <Stack.Screen name="OwnerHomeScreen" component={OwnerHomeScreen} />
     <Stack.Screen name="DestinationSearch" component={DestinationSearch} />
-    <Stack.Screen name="OTPScreen" component={OTPScreen} />
-    <Stack.Screen name="ProfileScreen" component={ProfileScreen} />
+    <Stack.Screen name="OTPScreen" component={OTPScreen} options={{  headerLeft: () => null}} />
+    <Stack.Screen name="ProfileScreen" component={ProfileScreen} options={{  headerLeft: () => null}} />
     <Stack.Screen name="BusinessProfileScreen" component={BusinessProfileScreen} options={{ headerShown: false }} />
     <Stack.Screen name="AssignAmbulanceScreen" component={AssignAmbulanceScreen} />
     <Stack.Screen name="AddDriverScreen" component={AddDriverScreen} />
-    <Stack.Screen name="AddAmbulanceScreen" component={AddAmbulanceScreen} />
-    <Stack.Screen name="BusinessRegistrationScreen" component={BusinessRegistrationScreen} />
+    <Stack.Screen name="AddAmbulanceScreen" component={AddAmbulanceScreen}  />
+    <Stack.Screen name="BusinessRegistrationScreen" component={BusinessRegistrationScreen} options={{  headerLeft: () => null}} />
     <Stack.Screen name="OwnerDashboardScreen" component={OwnerDashboardScreen} options={{ headerShown: false }} />
     <Stack.Screen name="HomeScreen" component={DrawerNavigator} options={{ headerShown: false }} />
     <Stack.Screen name="SearchResults" component={SearchResults} options={{ headerShown: false }} />
     <Stack.Screen name="OrderScreen" component={OrderScreen} options={{ headerShown: false }} />
     <Stack.Screen name="DriverLoginScreen" component={DriverLoginScreen} />
     <Stack.Screen name="DriverHomeScreen" component={DriverHomeScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="DHomeScreen" component={DHomeScreen} options={{ headerShown: false }}/>
+    <Stack.Screen name="DHomeScreen" component={DHomeScreen} options={{  headerLeft: () => null}}/>
     <Stack.Screen name="NewOrderPopup" component={NewOrderPopup} options={{ headerShown: false }} />
     <Stack.Screen name="DriverTrack" component={DriverTrack} options={{ headerShown: false }} />
     <Stack.Screen name="UserTrack" component={UserTrack} options={{ headerShown: false }} />
