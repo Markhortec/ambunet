@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   ScrollView,
   Alert,
+  Dimensions,
 } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import MapViewDirections from "react-native-maps-directions";
@@ -43,10 +44,15 @@ const DriverTrack = ({ route, navigation }) => {
   const [destination, setDestination] = useState(null);
   const [rideStatus, setRideStatus] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [hasArrived, setHasArrived] = useState(false);
   const [distanceToOrigin, setDistanceToOrigin] = useState(null);
   const [distanceToDestination, setDistanceToDestination] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const mapRef = useRef(null);
+
+  // Track if driver has arrived at pickup
+  const [hasArrivedAtPickup, setHasArrivedAtPickup] = useState(false);
+  // Track if ride has started (after pickup)
+  const [rideStarted, setRideStarted] = useState(false);
 
   useEffect(() => {
     const unsubscribe = firestore()
@@ -59,10 +65,20 @@ const DriverTrack = ({ route, navigation }) => {
           setRideStatus(data.status);
 
           if (data.driverLocation) {
-            setCurrentLocation({
+            const newLocation = {
               latitude: data.driverLocation.latitude,
               longitude: data.driverLocation.longitude,
-            });
+            };
+            setCurrentLocation(newLocation);
+            
+            // Animate map to driver location when it updates
+            if (mapRef.current) {
+              mapRef.current.animateToRegion({
+                ...newLocation,
+                latitudeDelta: 0.05,
+                longitudeDelta: 0.05,
+              }, 1000);
+            }
           }
 
           if (data.route) {
@@ -81,13 +97,27 @@ const DriverTrack = ({ route, navigation }) => {
               });
             }
           }
+
+          // Update state flags based on status changes
+          if (data.status === "Arrived" && rideStatus !== "Arrived") {
+            setHasArrivedAtPickup(true);
+            setRideStarted(false);
+          } else if (data.status === "Started" && rideStatus !== "Started") {
+            setRideStarted(true);
+            setHasArrivedAtPickup(true);
+          } else if (data.status === "Completed" && rideStatus !== "Completed") {
+            // Handle completion
+            handleRideCompletion();
+          }
+
           setLoading(false);
         }
       });
 
     return () => unsubscribe();
-  }, [orderId]);
+  }, [orderId, rideStatus]);
 
+  // Calculate distances and update arrival status
   useEffect(() => {
     if (!currentLocation || !origin || !destination) return;
 
@@ -108,18 +138,18 @@ const DriverTrack = ({ route, navigation }) => {
       );
       setDistanceToDestination(destDistance);
 
-      if (originDistance <= ARRIVAL_DISTANCE_THRESHOLD && !hasArrived) {
-        setHasArrived(true);
-      } else if (originDistance > ARRIVAL_DISTANCE_THRESHOLD) {
-        setHasArrived(false);
+      // Auto-detect arrival at pickup location
+      if (originDistance <= ARRIVAL_DISTANCE_THRESHOLD && !hasArrivedAtPickup && rideStatus === "In Progress") {
+        setHasArrivedAtPickup(true);
       }
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [currentLocation, origin, destination, hasArrived]);
+  }, [currentLocation, origin, destination, hasArrivedAtPickup, rideStatus]);
 
   const handleArrived = async () => {
     try {
+      setIsProcessing(true);
       await firestore().collection("orders").doc(orderId).update({
         status: "Arrived",
       });
@@ -127,84 +157,81 @@ const DriverTrack = ({ route, navigation }) => {
     } catch (error) {
       console.error("Error updating ride status:", error);
       Alert.alert("Error", "Failed to update arrival status");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleStartRide = async () => {
+    try {
+      setIsProcessing(true);
+      await firestore().collection("orders").doc(orderId).update({
+        status: "Started",
+      });
+      setRideStarted(true);
+    } catch (error) {
+      console.error("Error starting ride:", error);
+      Alert.alert("Error", "Failed to start ride");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   const handleCompleteRide = async () => {
     setIsProcessing(true);
     try {
-      // Validate required data
       if (!currentLocation || !destination || !orderData?.ambulanceRegNo) {
         Alert.alert("Error", "Missing required ride data");
-        setIsProcessing(false);
         return;
       }
-  
-      // Calculate the transfer amount
+
       const amount = orderData.calculatedPrice || 
                    (orderData.vehicle?.price * (orderData.pricePercentage || 18) / 100);
-  
-      // Document references
+
       const orderRef = firestore().collection("orders").doc(orderId);
       const ambulanceRef = firestore().collection("ambulances").doc(orderData.ambulanceRegNo);
       const earningsRef = firestore().collection("earnings").doc("8zX7cl2nm3v76i17FrJD");
-  
+
       await firestore().runTransaction(async (transaction) => {
-        // Get all necessary documents with error handling
-        const docs = await Promise.all([
-          transaction.get(orderRef).catch(() => undefined),
-          transaction.get(ambulanceRef).catch(() => undefined),
-          transaction.get(earningsRef).catch(() => undefined)
+        const [orderDoc, ambulanceDoc, earningsDoc] = await Promise.all([
+          transaction.get(orderRef),
+          transaction.get(ambulanceRef),
+          transaction.get(earningsRef)
         ]);
-  
-        const [orderDoc, ambulanceDoc, earningsDoc] = docs;
-  
-        // Validate documents exist
-        if (!orderDoc || !orderDoc.exists) {
-          throw new Error("Order document not found");
-        }
-        if (!ambulanceDoc || !ambulanceDoc.exists) {
-          throw new Error(`Ambulance document (${orderData.ambulanceRegNo}) not found`);
-        }
-  
-        // Get company reference
+
+        if (!orderDoc.exists) throw new Error("Order document not found");
+        if (!ambulanceDoc.exists) throw new Error("Ambulance document not found");
+
         const companyId = ambulanceDoc.data()?.companyId;
-        if (!companyId) {
-          throw new Error("Company ID not found in ambulance record");
-        }
-  
+        if (!companyId) throw new Error("Company ID not found");
+
         const companyRef = firestore().collection("businesses").doc(companyId);
         const companyDoc = await transaction.get(companyRef);
-        if (!companyDoc.exists) {
-          throw new Error("Company account not found");
-        }
-  
-        // Check company balance
+        if (!companyDoc.exists) throw new Error("Company account not found");
+
         const currentBalance = companyDoc.data()?.balance || 0;
         if (currentBalance < amount) {
           throw new Error(`Company has insufficient balance (Rs.${currentBalance} available)`);
         }
-  
-        // Initialize earnings if it doesn't exist
-        if (!earningsDoc || !earningsDoc.exists) {
+
+        if (!earningsDoc.exists) {
           transaction.set(earningsRef, {
             balance: 0,
             updatedAt: firestore.FieldValue.serverTimestamp(),
             createdAt: firestore.FieldValue.serverTimestamp()
           });
         }
-  
-        // Perform the financial transactions
+
         transaction.update(companyRef, {
           balance: firestore.FieldValue.increment(-amount),
           updatedAt: firestore.FieldValue.serverTimestamp()
         });
-  
+
         transaction.update(earningsRef, {
           balance: firestore.FieldValue.increment(amount),
           updatedAt: firestore.FieldValue.serverTimestamp()
         });
-  
+
         transaction.update(orderRef, {
           status: "Completed",
           completedAt: firestore.FieldValue.serverTimestamp(),
@@ -216,18 +243,16 @@ const DriverTrack = ({ route, navigation }) => {
           }
         });
       });
-  
-      // On successful completion
+
       Alert.alert(
         "Ride Completed",
         `Payment of Rs.${amount.toFixed(2)} processed successfully!`
       );
-  
-      // Clean up and navigate
+
       await AsyncStorage.removeItem('driverOrderId');
       dispatch(resetOrderData());
       navigation.navigate("DHomeScreen");
-  
+
     } catch (error) {
       console.error("Ride completion failed:", error);
       Alert.alert(
@@ -237,6 +262,12 @@ const DriverTrack = ({ route, navigation }) => {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleRideCompletion = async () => {
+    await AsyncStorage.removeItem('driverOrderId');
+    dispatch(resetOrderData());
+    navigation.navigate("DHomeScreen");
   };
 
   if (loading || !orderData || !currentLocation) {
@@ -257,29 +288,30 @@ const DriverTrack = ({ route, navigation }) => {
   }
 
   const isWithinCompletionDistance = distanceToDestination <= COMPLETION_DISTANCE_THRESHOLD;
-
+  const showPickupRoute = !hasArrivedAtPickup && rideStatus === "In Progress";
+  const showDestinationRoute = rideStarted || rideStatus === "Started";
+//line 301 have this code
+{/* <Text style={styles.distanceText}>
+              Distance to you: {(distanceToOrigin / 1000).toFixed(2)} km
+            </Text> */}
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.statusText}>Ride Status: {rideStatus}</Text>
         
-        {distanceToOrigin !== null && (
+        {distanceToOrigin !== null && rideStatus === "In Progress" && (
           <>
-            <Text style={styles.distanceText}>
-              Distance to pickup: {(distanceToOrigin / 1000).toFixed(2)} km
+          
+            <Text style={[
+              styles.distanceStatus,
+              hasArrivedAtPickup ? styles.successText : styles.warningText
+            ]}>
+              {hasArrivedAtPickup ? "Within arrival range" : "Approaching pickup"}
             </Text>
-            {rideStatus === "In Progress" && (
-              <Text style={[
-                styles.distanceStatus,
-                hasArrived ? styles.successText : styles.warningText
-              ]}>
-                {hasArrived ? "Within arrival range (40m)" : "Not in arrival range yet"}
-              </Text>
-            )}
           </>
         )}
 
-        {distanceToDestination !== null && rideStatus === "Arrived" && (
+        {distanceToDestination !== null && (rideStatus === "Arrived" || rideStatus === "Started") && (
           <>
             <Text style={styles.distanceText}>
               Distance to destination: {(distanceToDestination / 1000).toFixed(2)} km
@@ -289,55 +321,56 @@ const DriverTrack = ({ route, navigation }) => {
               isWithinCompletionDistance ? styles.successText : styles.warningText
             ]}>
               {isWithinCompletionDistance 
-                ? "Within completion range (60m)" 
-                : "Not in completion range yet"}
+                ? "Within completion range" 
+                : "En route to destination"}
             </Text>
           </>
         )}
       </View>
       
       <MapView
+        ref={mapRef}
         style={styles.map}
         provider={PROVIDER_GOOGLE}
         initialRegion={{
           latitude: currentLocation.latitude,
           longitude: currentLocation.longitude,
-          latitudeDelta: 0.07,
-          longitudeDelta: 0.07,
+          latitudeDelta: 0.05,
+          longitudeDelta: 0.05,
         }}
-        showsUserLocation
+        showsUserLocation={false}
       >
-        <Marker coordinate={currentLocation} title="Driver Location">
+        <Marker coordinate={currentLocation} title="Your Location">
           <View style={styles.markerContainer}>
             <Text style={styles.markerText}>🚑</Text>
           </View>
         </Marker>
         
-        {origin && (
-          <Marker coordinate={origin} title="Pickup Location" pinColor="blue" />
-        )}
+        <Marker coordinate={origin} title="Pickup Location" pinColor="blue" />
         
-        {destination && (
+        {(rideStarted || rideStatus === "Started") && (
           <Marker coordinate={destination} title="Destination" pinColor="green" />
         )}
         
-        {currentLocation && origin && (
+        {showPickupRoute && (
           <MapViewDirections
             origin={currentLocation}
             destination={origin}
             apikey={GOOGLE_MAPS_APIKEY}
             strokeWidth={4}
             strokeColor="blue"
+            onError={(error) => console.log("Pickup route error:", error)}
           />
         )}
         
-        {origin && destination && (
+        {showDestinationRoute && (
           <MapViewDirections
             origin={origin}
             destination={destination}
             apikey={GOOGLE_MAPS_APIKEY}
             strokeWidth={4}
             strokeColor="green"
+            onError={(error) => console.log("Destination route error:", error)}
           />
         )}
       </MapView>
@@ -357,7 +390,7 @@ const DriverTrack = ({ route, navigation }) => {
           <Text style={styles.detailText}>Base Price: Rs.{orderData.vehicle?.price?.toFixed(2) || "N/A"}</Text>
           <Text style={styles.detailText}>Applied Percentage: {orderData.pricePercentage || 18}%</Text>
           <Text style={[styles.detailText, styles.boldText]}>
-            Final Price: RS.{orderData.calculatedPrice?.toFixed(2) || 
+            Final Price: Rs.{orderData.calculatedPrice?.toFixed(2) || 
               ((orderData.vehicle?.price * (orderData.pricePercentage || 18) / 100).toFixed(2))}
           </Text>
         </View>
@@ -366,17 +399,27 @@ const DriverTrack = ({ route, navigation }) => {
       <View style={styles.buttonContainer}>
         {rideStatus === "In Progress" && (
           <Button 
-            title={hasArrived ? "I've Arrived" : "Approaching Pickup"}
+            title={hasArrivedAtPickup ? "Confirm Arrival" : "Approaching Pickup"}
             onPress={handleArrived} 
             color="#4CAF50"
-            disabled={!hasArrived || isProcessing}
+            disabled={!hasArrivedAtPickup || isProcessing}
           />
         )}
+        
         {rideStatus === "Arrived" && (
+          <Button 
+            title={isProcessing ? "Starting Ride..." : "Start Ride"}
+            onPress={handleStartRide} 
+            color="#2196F3"
+            disabled={isProcessing}
+          />
+        )}
+        
+        {(rideStatus === "Started" || rideStatus === "Arrived") && (
           <Button 
             title={isProcessing ? "Processing..." : "Complete Ride"}
             onPress={handleCompleteRide} 
-            color="#2196F3"
+            color="#FF5722"
             disabled={!isWithinCompletionDistance || isProcessing}
           />
         )}
@@ -412,6 +455,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
     marginTop: 5,
+    fontWeight: "500",
   },
   warningText: {
     color: "#FF5722",
@@ -420,8 +464,7 @@ const styles = StyleSheet.create({
     color: "#4CAF50",
   },
   map: {
-    flex: 1,
-    minHeight: 300,
+    height: Dimensions.get("window").height * 0.4,
   },
   markerContainer: {
     justifyContent: "center",
