@@ -65,7 +65,8 @@ const RoleScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.headerText}>Continue as a</Text>
+      <Text style={styles.headerText}>Select Your Role</Text>
+       <Text style={styles.sub1Text}>Choose how you'd like to use our platform</Text>
       <View style={styles.gridContainer}>
         <TouchableOpacity
           style={[styles.gridItem, selectedRole === 'User' && styles.selectedItem]}
@@ -73,6 +74,7 @@ const RoleScreen = ({ navigation }) => {
         >
           <Icon name="account" size={50} color="#F70000" />
           <Text style={styles.gridText}>User</Text>
+          <Text style={styles.subText}>Book services as a customer</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -81,14 +83,16 @@ const RoleScreen = ({ navigation }) => {
         >
           <Icon name="car" size={50} color="#F70000" />
           <Text style={styles.gridText}>Driver</Text>
+           <Text style={styles.subText}>Deliver services and earn</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.gridItem, selectedRole === 'Owner' && styles.selectedItem]}
           onPress={() => handleRoleSelection('Owner')}
         >
-          <Icon name="home" size={50} color="#F70000" />
-          <Text style={styles.gridText}>Owner</Text>
+          <Icon name="office-building" size={50} color="#F70000" />
+          <Text style={styles.gridText}>Register Your Business</Text>
+          <Text style={styles.subText}>Manage your services</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -104,23 +108,25 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   headerText: {
-    fontSize: 24,
+    fontSize: 30,
     fontWeight: 'bold',
     marginBottom: 30,
     color: 'white',
     textAlign: 'center',
   },
   gridContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap:'nowrap',
     justifyContent: 'space-around',
     width: '100%',
   },
   gridItem: {
-    width: '45%',
-    height: 150,
+    width: '50%',
+    height: 170,
     backgroundColor: '#FFF',
-    borderRadius: 10,
+    borderRadius: 50,
     justifyContent: 'center',
     alignItems: 'center',
     marginVertical: 10,
@@ -136,10 +142,23 @@ const styles = StyleSheet.create({
   },
   gridText: {
     marginTop: 10,
-    fontSize: 16,
+    fontSize: 20,
     color: '#333',
     fontWeight: 'bold',
     textAlign: 'center',
+  },
+    subText: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 5,
+  },
+  sub1Text: {
+    fontSize: 18,
+    color: '#fff',
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 20,
   },
   loadingContainer: {
     flex: 1,
