@@ -9,6 +9,7 @@ import {
   ScrollView,
   Alert,
   Modal,
+  TextInput,
   ActivityIndicator,
   TouchableOpacity,
   SafeAreaView
@@ -34,6 +35,8 @@ const DHomeScreen = ({ navigation }) => {
   const [businessBalance, setBusinessBalance] = useState(0);
   const [priceRules, setPriceRules] = useState([]);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedInfo, setEditedInfo] = useState({});
   const dispatch = useDispatch();
 
   useEffect(() => {
@@ -76,6 +79,13 @@ const DHomeScreen = ({ navigation }) => {
         if (driverDoc.exists) {
           const driverData = { id: driverId, ...driverDoc.data() };
           setDriverData(driverData);
+          setEditedInfo({
+            name: driverData.name,
+            email: driverData.email,
+            phoneNumber: driverData.phoneNumber,
+            address: driverData.address || '',
+            cnicNumber: driverData.cnicNumber || ''
+          });
           requestLocationPermission();
           fetchBusinessBalance(driverData.companyId);
         } else {
@@ -89,8 +99,53 @@ const DHomeScreen = ({ navigation }) => {
     }
   };
 
+  const updateDriverProfile = async () => {
+    try {
+      setLoading(true);
+      const { id } = driverData;
+      
+      await firestore().collection('drivers').doc(id).update({
+        name: editedInfo.name,
+        email: editedInfo.email,
+        phoneNumber: editedInfo.phoneNumber,
+        address: editedInfo.address,
+        cnicNumber: editedInfo.cnicNumber
+      });
+      
+      // Update local state
+      setDriverData(prev => ({
+        ...prev,
+        name: editedInfo.name,
+        email: editedInfo.email,
+        phoneNumber: editedInfo.phoneNumber,
+        address: editedInfo.address,
+        cnicNumber: editedInfo.cnicNumber
+      }));
+      
+      setIsEditing(false);
+      setLoading(false);
+      
+    } catch (error) {
+      console.error("Error updating driver data:", error);
+      Alert.alert("Error", "Failed to update profile");
+      setLoading(false);
+    }
+  };
+
   const toggleMenu = () => {
     setMenuVisible(!menuVisible);
+    setIsEditing(false);
+  };
+
+  const handleEdit = () => {
+    setIsEditing(true);
+  };
+
+  const handleInputChange = (field, value) => {
+    setEditedInfo(prev => ({
+      ...prev,
+      [field]: value
+    }));
   };
 
   const fetchPriceRules = async () => {
@@ -390,48 +445,121 @@ const DHomeScreen = ({ navigation }) => {
             
             {driverData && (
               <ScrollView style={styles.profileInfoContainer}>
-                {driverData.profilePhoto ? (
-                  <Image
-                    source={{ uri: driverData.profilePhoto }}
-                    style={styles.profileImage}
-                  />
+                {isEditing ? (
+                  <>
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Name:</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editedInfo.name}
+                        onChangeText={(text) => handleInputChange('name', text)}
+                      />
+                    </View>
+                    
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Email:</Text>
+                      <Text style={styles.nonEditableField}>{driverData.email}</Text>
+                    </View>
+                    
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Phone:</Text>
+                      <Text style={styles.nonEditableField}>{driverData.phoneNumber}</Text>
+                    </View>
+
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>CNIC Number:</Text>
+                      <Text style={styles.nonEditableField}>{driverData.cnicNumber || 'N/A'}</Text>
+                    </View>
+
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Address:</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editedInfo.address}
+                        onChangeText={(text) => handleInputChange('address', text)}
+                        multiline
+                      />
+                    </View>
+                    
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Status:</Text>
+                      <Text style={styles.nonEditableField}>{driverData.driverStatus}</Text>
+                    </View>
+
+             
+                    
+                    <TouchableOpacity 
+                      style={styles.saveButton} 
+                      onPress={updateDriverProfile}
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <ActivityIndicator size="small" color="#FFF" />
+                      ) : (
+                        <Text style={styles.saveButtonText}>Save Changes</Text>
+                      )}
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                      style={styles.cancelButton} 
+                      onPress={() => setIsEditing(false)}
+                    >
+                      <Text style={styles.cancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </>
                 ) : (
-                  <View style={styles.profilePlaceholder}>
-                    <Icon name="account" size={60} color="#666" />
-                  </View>
+                  <>
+                    {driverData.profilePhoto ? (
+                      <Image
+                        source={{ uri: driverData.profilePhoto }}
+                        style={styles.profileImage}
+                      />
+                    ) : (
+                      <View style={styles.profilePlaceholder}>
+                        <Icon name="account" size={60} color="#666" />
+                      </View>
+                    )}
+                    
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Name:</Text>
+                      <Text style={styles.infoText}>{driverData.name}</Text>
+                    </View>
+                    
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Email:</Text>
+                      <Text style={styles.infoText}>{driverData.email}</Text>
+                    </View>
+                    
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Phone:</Text>
+                      <Text style={styles.infoText}>{driverData.phoneNumber}</Text>
+                    </View>
+
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>CNIC Number:</Text>
+                      <Text style={styles.infoText}>{driverData.cnicNumber || 'N/A'}</Text>
+                    </View>
+
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Address:</Text>
+                      <Text style={styles.infoText}>{driverData.address || 'N/A'}</Text>
+                    </View>
+                    
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Status:</Text>
+                      <Text style={styles.infoText}>{driverData.driverStatus}</Text>
+                    </View>
+
+                  
+                    <TouchableOpacity 
+                      style={styles.editButton} 
+                      onPress={handleEdit}
+                    >
+                      <Text style={styles.editButtonText}>Edit Profile</Text>
+                    </TouchableOpacity>
+                    <Logout style={{paddingTop: 3, marginTop:9}} navigation={navigation} />
+                  </>
                 )}
-                
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Name:</Text>
-                  <Text style={styles.infoText}>{driverData.name}</Text>
-                </View>
-                
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Email:</Text>
-                  <Text style={styles.infoText}>{driverData.email}</Text>
-                </View>
-                
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Phone:</Text>
-                  <Text style={styles.infoText}>{driverData.phoneNumber}</Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>CNIC Number:</Text>
-                  <Text style={styles.infoText}>{driverData.cnicNumber || 'N/A'}</Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Address:</Text>
-                  <Text style={styles.infoText}>{driverData.address || 'N/A'}</Text>
-                </View>
-                
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Status:</Text>
-                  <Text style={styles.infoText}>{driverData.driverStatus}</Text>
-                </View>
-
-                <Logout navigation={navigation} />
               </ScrollView>
             )}
           </View>
@@ -828,7 +956,71 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     textAlign: 'right',
     maxWidth: '60%',
-  }
+  },
+  inputContainer: {
+    marginBottom: 15,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEE',
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#555',
+    marginBottom: 5,
+  },
+  input: {
+    fontSize: 16,
+    color: '#333',
+    borderWidth: 1,
+    borderColor: '#DDD',
+    borderRadius: 5,
+    padding: 8,
+  },
+  nonEditableField: {
+    fontSize: 16,
+    color: '#333',
+    padding: 8,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 5,
+  },
+  editButton: {
+    backgroundColor: '#F70000',
+    padding: 12,
+    borderRadius: 5,
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  editButtonText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 16,
+    
+  },
+  saveButton: {
+    backgroundColor: '#F70000',
+    padding: 12,
+    borderRadius: 5,
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  cancelButton: {
+    backgroundColor: '#DDD',
+    padding: 12,
+    borderRadius: 5,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#333',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
 });
 
 export default DHomeScreen;
